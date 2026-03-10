@@ -50,18 +50,20 @@ struct SeekBarView: View {
             )
             .overlay(alignment: .topLeading) {
                 if isHovering, let thumbnail = hoverThumbnail {
-                    let clampedX = min(max(hoverX - 80, 0), width - 160)
+                    let previewWidth: CGFloat = 280
+                    let previewHeight: CGFloat = 158
+                    let clampedX = min(max(hoverX - (previewWidth / 2), 0), width - previewWidth)
                     Image(nsImage: thumbnail)
                         .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 160)
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: previewWidth, height: previewHeight)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                         .overlay(
                             RoundedRectangle(cornerRadius: 4)
                                 .stroke(.white, lineWidth: 2)
                         )
                         .shadow(radius: 4)
-                        .offset(x: clampedX, y: -100)
+                        .offset(x: clampedX, y: -previewHeight - 14)
                         .allowsHitTesting(false)
                 }
             }
