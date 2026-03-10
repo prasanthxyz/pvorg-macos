@@ -21,25 +21,57 @@ struct FFmpegRunner {
     static func runProcess(executable: String, arguments: [String]) async throws -> ProcessResult {
         try await withCheckedThrowingContinuation { continuation in
             let process = Process()
-            let outPipe = Pipe()
-            let errPipe = Pipe()
+            let fm = FileManager.default
+            let tempDir = fm.temporaryDirectory
+            let token = UUID().uuidString
+            let outURL = tempDir.appendingPathComponent("pvorg-\(token)-stdout.log")
+            let errURL = tempDir.appendingPathComponent("pvorg-\(token)-stderr.log")
+
+            guard fm.createFile(atPath: outURL.path, contents: nil),
+                  fm.createFile(atPath: errURL.path, contents: nil) else {
+                continuation.resume(throwing: ProcessError.executionFailed("Failed to create temporary output files for process capture"))
+                return
+            }
+
+            let stdoutHandle: FileHandle
+            let stderrHandle: FileHandle
+            do {
+                stdoutHandle = try FileHandle(forWritingTo: outURL)
+                stderrHandle = try FileHandle(forWritingTo: errURL)
+            } catch {
+                try? fm.removeItem(at: outURL)
+                try? fm.removeItem(at: errURL)
+                continuation.resume(throwing: ProcessError.executionFailed("Failed opening temporary output files: \(error.localizedDescription)"))
+                return
+            }
 
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = [executable] + arguments
-            process.standardOutput = outPipe
-            process.standardError = errPipe
+            process.standardOutput = stdoutHandle
+            process.standardError = stderrHandle
 
             process.terminationHandler = { proc in
-                let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-                let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+                try? stdoutHandle.close()
+                try? stderrHandle.close()
+
+                let outData = (try? Data(contentsOf: outURL)) ?? Data()
+                let errData = (try? Data(contentsOf: errURL)) ?? Data()
+                try? FileManager.default.removeItem(at: outURL)
+                try? FileManager.default.removeItem(at: errURL)
+
                 let out = String(data: outData, encoding: .utf8) ?? ""
                 let err = String(data: errData, encoding: .utf8) ?? ""
+
                 continuation.resume(returning: ProcessResult(stdout: out, stderr: err, exitCode: proc.terminationStatus))
             }
 
             do {
                 try process.run()
             } catch {
+                try? stdoutHandle.close()
+                try? stderrHandle.close()
+                try? fm.removeItem(at: outURL)
+                try? fm.removeItem(at: errURL)
                 continuation.resume(throwing: ProcessError.executionFailed("Failed to run \(executable): \(error.localizedDescription)"))
             }
         }

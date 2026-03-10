@@ -10,12 +10,19 @@ enum Preprocessor {
         videosPath: String,
         progress: @escaping @Sendable (String) async -> Void
     ) async {
+        var tgpGenerated = 0
+        var tgpExisting = 0
+        var tgpFailed = 0
+        var metadataExisting = 0
+        var metadataExtracted = 0
+        var metadataFailed = 0
+
         let videosDir = URL(fileURLWithPath: videosPath, isDirectory: true)
         let imgDir = videosDir.appendingPathComponent("img", isDirectory: true)
         do {
             try imgDir.createDirectoryIfNeeded()
         } catch {
-            Log.preprocess.error("Failed creating img directory: \(error.localizedDescription, privacy: .public)")
+            logError("Failed creating img directory: \(error.localizedDescription)")
         }
 
         let cacheURL = videosDir.appendingPathComponent("cache.json")
@@ -23,20 +30,37 @@ enum Preprocessor {
         await cache.load()
 
         for (index, video) in videos.enumerated() {
-            await progress("Processing \(index + 1)/\(videos.count): \(video.filename)")
+            let progressMessage = "Processing \(index + 1)/\(videos.count): \(video.filename)"
+            await progress(progressMessage)
+            Log.preprocess.info("\(progressMessage, privacy: .public)")
+            print(progressMessage)
 
             let tgpURL = imgDir.appendingPathComponent("\(video.filename).jpg")
             if !FileManager.default.fileExists(atPath: tgpURL.path) {
                 do {
-                    _ = try await generateTGP(videoURL: video.fileURL, outputURL: tgpURL)
+                    try await generateTGP(videoURL: video.fileURL, outputURL: tgpURL)
+                    tgpGenerated += 1
+                    let msg = "TGP generated: \(video.filename)"
+                    Log.preprocess.info("\(msg, privacy: .public)")
+                    print(msg)
                 } catch {
-                    Log.preprocess.error("TGP generation failed for \(video.filename, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                    tgpFailed += 1
+                    logError("TGP generation failed for \(video.filename): \(error.localizedDescription)")
                 }
+            } else {
+                tgpExisting += 1
             }
 
-            if !(await cache.has(video.filename)) {
-                if let metadata = try? await extractMetadata(videoURL: video.fileURL) {
+            if await cache.has(video.filename) {
+                metadataExisting += 1
+            } else {
+                do {
+                    let metadata = try await extractMetadata(videoURL: video.fileURL)
                     await cache.set(video.filename, value: metadata)
+                    metadataExtracted += 1
+                } catch {
+                    metadataFailed += 1
+                    logError("Metadata extraction failed for \(video.filename): \(error.localizedDescription)")
                 }
             }
         }
@@ -44,22 +68,38 @@ enum Preprocessor {
         do {
             try await cache.save()
         } catch {
-            Log.preprocess.error("Failed saving cache: \(error.localizedDescription, privacy: .public)")
+            logError("Failed saving cache: \(error.localizedDescription)")
         }
+
+        let summary = """
+        Preprocess Summary
+        ------------------
+        Videos scanned:            \(videos.count)
+        TGP generated:             \(tgpGenerated)
+        TGP already existing:      \(tgpExisting)
+        TGP failed:                \(tgpFailed)
+        Metadata from cache:       \(metadataExisting)
+        Metadata newly extracted:  \(metadataExtracted)
+        Metadata extraction failed:\(metadataFailed)
+        Cache file:                \(cacheURL.path)
+        """
+        Log.preprocess.info("\(summary, privacy: .public)")
+        print(summary)
 
         await progress("")
     }
 
-    static func generateTGP(videoURL: URL, outputURL: URL) async throws -> Bool {
-        guard let duration = try await getVideoDuration(videoURL: videoURL), duration >= 1 else {
-            return false
+    static func generateTGP(videoURL: URL, outputURL: URL) async throws {
+        let duration = try await getVideoDuration(videoURL: videoURL)
+        guard duration >= 1 else {
+            throw ProcessError.executionFailed("Video duration is too short (<1s): \(duration)")
         }
 
         let numTiles = tgpCols * tgpRows
         let interval = duration / Double(numTiles)
         let offset = interval / 2
 
-        var args: [String] = []
+        var args: [String] = ["-hide_banner", "-v", "error", "-nostats"]
         var streamLabels: [String] = []
         var layoutParts: [String] = []
 
@@ -86,10 +126,16 @@ enum Preprocessor {
         ])
 
         let result = try await FFmpegRunner.runProcess(executable: "ffmpeg", arguments: args)
-        return result.exitCode == 0
+        guard result.exitCode == 0 else {
+            throw ProcessError.executionFailed("""
+            ffmpeg failed (exit \(result.exitCode)) for \(videoURL.lastPathComponent)
+            stderr: \(trim(result.stderr))
+            stdout: \(trim(result.stdout))
+            """)
+        }
     }
 
-    static func getVideoDuration(videoURL: URL) async throws -> Double? {
+    static func getVideoDuration(videoURL: URL) async throws -> Double {
         let args = [
             "-v", "error",
             "-select_streams", "v:0",
@@ -98,8 +144,19 @@ enum Preprocessor {
             videoURL.path,
         ]
         let result = try await FFmpegRunner.runProcess(executable: "ffprobe", arguments: args)
-        guard result.exitCode == 0 else { return nil }
-        return Double(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+        guard result.exitCode == 0 else {
+            throw ProcessError.executionFailed("""
+            ffprobe duration failed (exit \(result.exitCode)) for \(videoURL.lastPathComponent)
+            stderr: \(trim(result.stderr))
+            stdout: \(trim(result.stdout))
+            """)
+        }
+
+        let durationText = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let duration = Double(durationText), duration.isFinite else {
+            throw ProcessError.executionFailed("ffprobe duration parse failed for \(videoURL.lastPathComponent). Raw: \(durationText)")
+        }
+        return duration
     }
 
     static func extractMetadata(videoURL: URL) async throws -> MetadataCacheEntry {
@@ -114,7 +171,11 @@ enum Preprocessor {
 
         let result = try await FFmpegRunner.runProcess(executable: "ffprobe", arguments: args)
         guard result.exitCode == 0 else {
-            throw ProcessError.executionFailed("ffprobe failed: \(result.stderr)")
+            throw ProcessError.executionFailed("""
+            ffprobe metadata failed (exit \(result.exitCode)) for \(videoURL.lastPathComponent)
+            stderr: \(trim(result.stderr))
+            stdout: \(trim(result.stdout))
+            """)
         }
 
         let data = Data(result.stdout.utf8)
@@ -132,5 +193,19 @@ enum Preprocessor {
         let fileSize = Int(fileSizeString) ?? 0
 
         return MetadataCacheEntry(duration: duration, width: width, height: height, fps: fps, fileSize: fileSize)
+    }
+
+    private static func logError(_ message: String) {
+        Log.preprocess.error("\(message, privacy: .public)")
+        print("ERROR [preprocess] \(message)")
+    }
+
+    private static func trim(_ text: String, maxLength: Int = 800) -> String {
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized.count <= maxLength {
+            return normalized
+        }
+        let idx = normalized.index(normalized.startIndex, offsetBy: maxLength)
+        return String(normalized[..<idx]) + "..."
     }
 }
