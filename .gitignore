@@ -1,0 +1,19 @@
+.DS_Store
+.build/
+.swiftpm/
+Package.resolved
+*.xcodeproj/
+DerivedData/
+dist/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
