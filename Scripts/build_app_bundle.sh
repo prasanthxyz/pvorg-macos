@@ -49,6 +49,14 @@ mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 cp "$BIN_EXEC" "$APP_DIR/Contents/MacOS/$APP_NAME"
 chmod +x "$APP_DIR/Contents/MacOS/$APP_NAME"
 
+echo "Compiling assets..."
+xcrun actool "$ROOT_DIR/Sources/PvorgNative/Resources/Assets.xcassets" \
+  --compile "$APP_DIR/Contents/Resources" \
+  --platform macosx \
+  --minimum-deployment-target 14.0 \
+  --app-icon AppIcon \
+  --output-partial-info-plist "$SCRATCH_PATH/AppIconPartialInfo.plist"
+
 cat >"$APP_DIR/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -76,6 +84,10 @@ cat >"$APP_DIR/Contents/Info.plist" <<EOF
   <string>14.0</string>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>CFBundleIconName</key>
+  <string>AppIcon</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
 </dict>
 </plist>
 EOF

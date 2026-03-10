@@ -12,7 +12,10 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "PvorgNative",
-            path: "Sources/PvorgNative"
+            path: "Sources/PvorgNative",
+            resources: [
+                .process("Resources")
+            ]
         ),
     ]
 )
