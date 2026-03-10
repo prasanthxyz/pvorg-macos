@@ -18,8 +18,24 @@ enum ProcessError: Error, LocalizedError {
 }
 
 struct FFmpegRunner {
+    private final class SafeState: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _resumed = false
+        func markResumed() -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            if _resumed { return false }
+            _resumed = true
+            return true
+        }
+    }
+
     static func runProcess(executable: String, arguments: [String]) async throws -> ProcessResult {
-        try await withCheckedThrowingContinuation { continuation in
+        let startTime = Date()
+        let commandString = "\(executable) \(arguments.joined(separator: " "))"
+        Log.preprocess.info("Starting process: \(commandString, privacy: .public)")
+
+        return try await withCheckedThrowingContinuation { continuation in
+            let state = SafeState()
             let process = Process()
             let fm = FileManager.default
             let tempDir = fm.temporaryDirectory
@@ -29,7 +45,9 @@ struct FFmpegRunner {
 
             guard fm.createFile(atPath: outURL.path, contents: nil),
                   fm.createFile(atPath: errURL.path, contents: nil) else {
-                continuation.resume(throwing: ProcessError.executionFailed("Failed to create temporary output files for process capture"))
+                if state.markResumed() {
+                    continuation.resume(throwing: ProcessError.executionFailed("Failed to create temporary output files for process capture"))
+                }
                 return
             }
 
@@ -41,7 +59,9 @@ struct FFmpegRunner {
             } catch {
                 try? fm.removeItem(at: outURL)
                 try? fm.removeItem(at: errURL)
-                continuation.resume(throwing: ProcessError.executionFailed("Failed opening temporary output files: \(error.localizedDescription)"))
+                if state.markResumed() {
+                    continuation.resume(throwing: ProcessError.executionFailed("Failed opening temporary output files: \(error.localizedDescription)"))
+                }
                 return
             }
 
@@ -49,8 +69,30 @@ struct FFmpegRunner {
             process.arguments = [executable] + arguments
             process.standardOutput = stdoutHandle
             process.standardError = stderrHandle
+            process.standardInput = nil // Prevent hang waiting for stdin
+
+            // Timeout mechanism
+            let timeoutTask = Task {
+                try? await Task.sleep(nanoseconds: 30 * 1_000_000_000) // 30s timeout
+                if state.markResumed() {
+                    Log.preprocess.error("Process timed out after 30s: \(commandString, privacy: .public)")
+                    process.terminate()
+                    // The terminationHandler will be called when we call terminate()
+                    // but we already marked it as resumed here, so we need to resume the continuation now.
+
+                    try? stdoutHandle.close()
+                    try? stderrHandle.close()
+                    try? FileManager.default.removeItem(at: outURL)
+                    try? FileManager.default.removeItem(at: errURL)
+
+                    continuation.resume(throwing: ProcessError.executionFailed("Process timed out after 30s: \(commandString)"))
+                }
+            }
 
             process.terminationHandler = { proc in
+                timeoutTask.cancel()
+                guard state.markResumed() else { return }
+
                 try? stdoutHandle.close()
                 try? stderrHandle.close()
 
@@ -62,17 +104,23 @@ struct FFmpegRunner {
                 let out = String(data: outData, encoding: .utf8) ?? ""
                 let err = String(data: errData, encoding: .utf8) ?? ""
 
+                let duration = Date().timeIntervalSince(startTime)
+                Log.preprocess.info("Process finished in \(String(format: "%.2fs", duration)): \(executable) (exit \(proc.terminationStatus))")
+
                 continuation.resume(returning: ProcessResult(stdout: out, stderr: err, exitCode: proc.terminationStatus))
             }
 
             do {
                 try process.run()
             } catch {
-                try? stdoutHandle.close()
-                try? stderrHandle.close()
-                try? fm.removeItem(at: outURL)
-                try? fm.removeItem(at: errURL)
-                continuation.resume(throwing: ProcessError.executionFailed("Failed to run \(executable): \(error.localizedDescription)"))
+                timeoutTask.cancel()
+                if state.markResumed() {
+                    try? stdoutHandle.close()
+                    try? stderrHandle.close()
+                    try? fm.removeItem(at: outURL)
+                    try? fm.removeItem(at: errURL)
+                    continuation.resume(throwing: ProcessError.executionFailed("Failed to run \(executable): \(error.localizedDescription)"))
+                }
             }
         }
     }

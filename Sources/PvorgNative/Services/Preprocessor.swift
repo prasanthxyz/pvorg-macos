@@ -38,6 +38,7 @@ enum Preprocessor {
             let tgpURL = imgDir.appendingPathComponent("\(video.filename).jpg")
             if !FileManager.default.fileExists(atPath: tgpURL.path) {
                 do {
+                    Log.preprocess.info("Generating TGP for \(video.filename)...")
                     try await generateTGP(videoURL: video.fileURL, outputURL: tgpURL)
                     tgpGenerated += 1
                     let msg = "TGP generated: \(video.filename)"
@@ -55,6 +56,7 @@ enum Preprocessor {
                 metadataExisting += 1
             } else {
                 do {
+                    Log.preprocess.info("Extracting metadata for \(video.filename)...")
                     let metadata = try await extractMetadata(videoURL: video.fileURL)
                     await cache.set(video.filename, value: metadata)
                     metadataExtracted += 1
