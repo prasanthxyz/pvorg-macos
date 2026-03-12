@@ -50,12 +50,16 @@ cp "$BIN_EXEC" "$APP_DIR/Contents/MacOS/$APP_NAME"
 chmod +x "$APP_DIR/Contents/MacOS/$APP_NAME"
 
 echo "Compiling assets..."
-xcrun actool "$ROOT_DIR/Sources/PvorgNative/Resources/Assets.xcassets" \
+if xcrun actool "$ROOT_DIR/Sources/PvorgNative/Resources/Assets.xcassets" \
   --compile "$APP_DIR/Contents/Resources" \
   --platform macosx \
   --minimum-deployment-target 14.0 \
   --app-icon AppIcon \
-  --output-partial-info-plist "$SCRATCH_PATH/AppIconPartialInfo.plist"
+  --output-partial-info-plist "$SCRATCH_PATH/AppIconPartialInfo.plist"; then
+  echo "Assets compiled."
+else
+  echo "Warning: asset compilation failed (continuing without compiled app icon assets)." >&2
+fi
 
 cat >"$APP_DIR/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>

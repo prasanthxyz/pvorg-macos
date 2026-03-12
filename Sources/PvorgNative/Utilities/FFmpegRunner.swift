@@ -18,6 +18,15 @@ enum ProcessError: Error, LocalizedError {
 }
 
 struct FFmpegRunner {
+    private static let fallbackExecutablePaths: [String] = [
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+    ]
+
     private final class SafeState: @unchecked Sendable {
         private let lock = NSLock()
         private var _resumed = false
@@ -67,6 +76,7 @@ struct FFmpegRunner {
 
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = [executable] + arguments
+            process.environment = runtimeEnvironment()
             process.standardOutput = stdoutHandle
             process.standardError = stderrHandle
             process.standardInput = nil // Prevent hang waiting for stdin
@@ -138,6 +148,19 @@ struct FFmpegRunner {
         }
 
         return (Double(rFrameRate) ?? 0).rounded(toPlaces: 2)
+    }
+
+    private static func runtimeEnvironment() -> [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        let current = (environment["PATH"] ?? "")
+            .split(separator: ":")
+            .map(String.init)
+        var merged = current
+        for path in fallbackExecutablePaths where !merged.contains(path) {
+            merged.append(path)
+        }
+        environment["PATH"] = merged.joined(separator: ":")
+        return environment
     }
 }
 
