@@ -12,7 +12,7 @@ struct DeleterView: View {
     private let columns = [GridItem(.adaptive(minimum: 200), spacing: 12)]
 
     private var sortedVideos: [Video] {
-        appState.videos.sorted { $0.filename < $1.filename }
+        VideoDisplaySort.sorted(appState.videos)
     }
 
     private var totalPages: Int {

@@ -1,6 +1,6 @@
 import Foundation
 
-struct Video: Identifiable, Hashable {
+struct Video: Identifiable, Hashable, VideoDisplaySortable {
     let id: String
     let filename: String
     let studio: String

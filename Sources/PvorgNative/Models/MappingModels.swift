@@ -1,6 +1,6 @@
 import Foundation
 
-struct MappingVideoRow: Identifiable {
+struct MappingVideoRow: Identifiable, VideoDisplaySortable {
     let id: String
     let filename: String
     let title: String

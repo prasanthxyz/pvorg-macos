@@ -214,6 +214,8 @@ final class AppState {
             ))
         }
 
+        rows = VideoDisplaySort.sorted(rows)
+
         let total = rows.count
         let totalPages = max(1, Int(ceil(Double(total) / Double(pageSize))))
         let clampedPage = min(max(page, 1), totalPages)
@@ -259,6 +261,8 @@ final class AppState {
                 map: map
             ))
         }
+
+        rows = VideoDisplaySort.sorted(rows)
 
         let total = rows.count
         let totalPages = max(1, Int(ceil(Double(total) / Double(pageSize))))
