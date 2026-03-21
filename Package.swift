@@ -17,5 +17,10 @@ let package = Package(
                 .process("Resources")
             ]
         ),
+        .testTarget(
+            name: "PvorgNativeTests",
+            dependencies: ["PvorgNative"],
+            path: "Tests/PvorgNativeTests"
+        ),
     ]
 )

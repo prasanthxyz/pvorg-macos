@@ -16,6 +16,30 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.bgPrimary)
+        .sheet(
+            item: Binding(
+                get: { appState.staleCleanupPreview },
+                set: { appState.staleCleanupPreview = $0 }
+            )
+        ) { preview in
+            StaleConfigCleanupSheet(
+                preview: preview,
+                onCancel: { appState.dismissStaleConfigCleanupPreview() },
+                onConfirm: { appState.confirmStaleConfigCleanup() }
+            )
+        }
+        .alert(
+            item: Binding(
+                get: { appState.appNotice },
+                set: { appState.appNotice = $0 }
+            )
+        ) { notice in
+            Alert(
+                title: Text(notice.title),
+                message: Text(notice.message),
+                dismissButton: .default(Text("OK"))
+            )
+        }
     }
 }
 

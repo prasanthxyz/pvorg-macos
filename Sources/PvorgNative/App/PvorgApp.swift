@@ -111,6 +111,13 @@ struct PvorgApp: App {
                 }
                 .keyboardShortcut("9", modifiers: [])
             }
+
+            CommandMenu("Maintenance") {
+                Button("Clean Stale Config Entries...") {
+                    appState.showStaleConfigCleanupPreview()
+                }
+                .disabled(!appState.isReady || appState.config == nil)
+            }
         }
     }
 }

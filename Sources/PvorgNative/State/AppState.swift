@@ -5,13 +5,18 @@ struct StartupReport {
     var invalidFilenamesSkipped: Int = 0
     var entriesNormalized: Int = 0
     var orphanAssetsRemoved: Int = 0
-    var staleConfigEntriesRemoved: Int = 0
 }
 
 struct SkippedFile: Identifiable {
     let id = UUID()
     let filename: String
     let reasons: [String]
+}
+
+struct AppNotice: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
 }
 
 @Observable
@@ -38,6 +43,8 @@ final class AppState {
     // Startup report
     var skippedFiles: [SkippedFile] = []
     var startupReport: StartupReport? = nil
+    var staleCleanupPreview: StaleConfigCleanupPreview? = nil
+    var appNotice: AppNotice? = nil
 
     private let pipelineGuard = PipelineGuard()
 
@@ -72,6 +79,52 @@ final class AppState {
     func reload() {
         Task(priority: .userInitiated) {
             await runStartupPipeline()
+        }
+    }
+
+    func showStaleConfigCleanupPreview() {
+        do {
+            guard let config else {
+                throw NSError(domain: "AppState", code: 2, userInfo: [NSLocalizedDescriptionKey: "Config not loaded yet."])
+            }
+            staleCleanupPreview = try CleanupService.staleConfigEntriesPreview(config: config)
+        } catch {
+            appNotice = AppNotice(
+                title: "Cleanup Unavailable",
+                message: error.localizedDescription
+            )
+        }
+    }
+
+    func dismissStaleConfigCleanupPreview() {
+        staleCleanupPreview = nil
+    }
+
+    func confirmStaleConfigCleanup() {
+        do {
+            guard var config else {
+                throw NSError(domain: "AppState", code: 3, userInfo: [NSLocalizedDescriptionKey: "Config not loaded yet."])
+            }
+            guard let preview = staleCleanupPreview else {
+                throw NSError(domain: "AppState", code: 4, userInfo: [NSLocalizedDescriptionKey: "No cleanup preview is available."])
+            }
+
+            let removed = CleanupService.removeConfigEntries(config: &config, keys: preview.staleEntries)
+            try ConfigService.saveConfig(config)
+            try rescanFromConfig(config, preserveSelections: true)
+
+            staleCleanupPreview = nil
+            appNotice = AppNotice(
+                title: "Cleanup Complete",
+                message: removed == 0
+                    ? "No stale entries were found."
+                    : "Removed \(removed) stale config entr\(removed == 1 ? "y" : "ies")."
+            )
+        } catch {
+            appNotice = AppNotice(
+                title: "Cleanup Failed",
+                message: error.localizedDescription
+            )
         }
     }
 
@@ -343,16 +396,6 @@ final class AppState {
                 validFilenames: Set(videos.map(\.filename))
             )
 
-            progressText = "Cleaning stale config entries..."
-            let staleRemoved = CleanupService.cleanupStaleConfigEntries(config: &config)
-            if staleRemoved > 0 {
-                try ConfigService.saveConfig(config)
-                galleries = try FilesystemScanner.scanGalleries(config: config)
-                scan = try FilesystemScanner.scanVideos(config: config, galleryNames: galleries.map(\.name))
-                videos = scan.videos
-                skipped = scan.skipped
-            }
-
             progressText = "Running preprocessing..."
             await Preprocessor.run(videos: videos, videosPath: config.videosPath) { message in
                 await MainActor.run {
@@ -365,8 +408,7 @@ final class AppState {
             startupReport = StartupReport(
                 invalidFilenamesSkipped: skipped.count,
                 entriesNormalized: normalized,
-                orphanAssetsRemoved: orphaned,
-                staleConfigEntriesRemoved: staleRemoved
+                orphanAssetsRemoved: orphaned
             )
 
             applyLoadedData(
@@ -383,7 +425,6 @@ final class AppState {
             Invalid filenames skipped:    \(skipped.count)
             Entries normalized:           \(normalized)
             Orphan assets removed:        \(orphaned)
-            Stale config entries removed: \(staleRemoved)
             """)
 
             progressText = ""
