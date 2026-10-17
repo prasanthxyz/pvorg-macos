@@ -22,6 +22,7 @@ final class KeyboardCommandTests: XCTestCase {
         XCTAssertEqual(PlainKeyCommand(characters: String(UnicodeScalar(NSLeftArrowFunctionKey)!)), .skipBack)
         XCTAssertEqual(PlainKeyCommand(characters: String(UnicodeScalar(NSRightArrowFunctionKey)!)), .skipForward)
         XCTAssertEqual(PlainKeyCommand(characters: "7"), .jump(tenths: 7))
+        XCTAssertEqual(PlainKeyCommand(characters: "\u{7f}"), .excludePairing, "The Delete key")
         XCTAssertNil(PlainKeyCommand(characters: "x"))
     }
 
@@ -69,6 +70,6 @@ final class KeyboardCommandTests: XCTestCase {
             Video(filename: "globex-sam-two.mp4", studio: "globex", actors: ["sam"], title: "two", fileURL: URL(fileURLWithPath: "/tmp/2.mp4"), relatedGalleries: ["G1", "G2"], tags: []),
         ]
         appState.resetFilters()
-        return CommandContext(appState: appState, navigation: AppNavigation(), viewer: ViewerModel())
+        return CommandContext(appState: appState, navigation: AppNavigation(), viewer: ViewerModel(), mappings: MappingStore(), toasts: ToastCenter(), keyboard: KeyboardContext())
     }
 }

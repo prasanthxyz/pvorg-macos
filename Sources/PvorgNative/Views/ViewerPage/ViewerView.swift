@@ -4,6 +4,13 @@ struct ViewerView: View {
     @Environment(AppState.self) private var appState
     @Environment(AppNavigation.self) private var navigation
     @Environment(ViewerModel.self) private var viewer
+    @Environment(MappingStore.self) private var mappings
+    @Environment(ToastCenter.self) private var toasts
+    @Environment(KeyboardContext.self) private var keyboard
+
+    private var commands: CommandContext {
+        CommandContext(appState: appState, navigation: navigation, viewer: viewer, mappings: mappings, toasts: toasts, keyboard: keyboard)
+    }
 
     var body: some View {
         Group {
@@ -56,6 +63,23 @@ struct ViewerView: View {
             }
         }
         .background(Color.stage)
+        .contextMenu { stageMenu(for: combination) }
+    }
+
+    @ViewBuilder
+    private func stageMenu(for combination: Combination) -> some View {
+        Button("Exclude “\(combination.gallery.name)” from This Video", systemImage: "hand.thumbsdown") {
+            commands.excludeCurrentPairing()
+        }
+        Divider()
+        Button("Reveal Video in Finder") {
+            NSWorkspace.shared.activateFileViewerSelecting([combination.video.fileURL])
+        }
+        if let firstImage = combination.gallery.imageFiles.first {
+            Button("Reveal Gallery in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([firstImage.deletingLastPathComponent()])
+            }
+        }
     }
 
     @ViewBuilder
@@ -89,6 +113,16 @@ struct ViewerView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        ToolbarItem {
+            Button {
+                commands.excludeCurrentPairing()
+            } label: {
+                Label("Exclude Pairing", systemImage: "hand.thumbsdown")
+            }
+            .help(excludeHelp)
+            .disabled(appState.currentCombination == nil)
+        }
+
         ToolbarItem {
             Picker("Display", selection: modeBinding) {
                 Label("Contact Sheet", systemImage: "square.grid.3x3")
@@ -151,6 +185,11 @@ struct ViewerView: View {
     private var subtitle: String {
         guard let combination = appState.currentCombination else { return "" }
         return DisplayName.credits(studio: combination.video.studio, actors: combination.video.actors)
+    }
+
+    private var excludeHelp: String {
+        guard let combination = appState.currentCombination else { return "Exclude this pairing" }
+        return "Never pair “\(combination.gallery.name)” with this video (⌫). Undo with ⌘Z."
     }
 
     private var positionText: String {

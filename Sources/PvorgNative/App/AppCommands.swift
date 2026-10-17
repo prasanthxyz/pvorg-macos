@@ -8,10 +8,11 @@ struct AppCommands: Commands {
     let navigation: AppNavigation
     let viewer: ViewerModel
     let mappings: MappingStore
+    let keyboard: KeyboardContext
     let toasts: ToastCenter
 
     private var context: CommandContext {
-        CommandContext(appState: appState, navigation: navigation, viewer: viewer)
+        CommandContext(appState: appState, navigation: navigation, viewer: viewer, mappings: mappings, toasts: toasts, keyboard: keyboard)
     }
 
     var body: some Commands {
@@ -63,6 +64,7 @@ struct AppCommands: Commands {
             commandButton(viewer.mode == .video ? "Show Contact Sheet" : "Play Video", .toggleMode)
             commandButton("Previous Combination", .previous)
             commandButton("Next Combination", .next)
+            commandButton(excludeTitle, .excludePairing)
 
             Divider()
 
@@ -85,6 +87,11 @@ struct AppCommands: Commands {
         }
         .keyboardShortcut(command.key, modifiers: [])
         .disabled(!context.isAvailable(command))
+    }
+
+    private var excludeTitle: String {
+        guard let gallery = appState.currentCombination?.gallery.name else { return "Exclude Pairing" }
+        return "Exclude “\(gallery)” from This Video"
     }
 
     private var activeMapping: MappingSession? {

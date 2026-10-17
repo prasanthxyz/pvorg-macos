@@ -87,6 +87,13 @@ final class MappingSession {
         pendingChanges.removeAll()
     }
 
+    /// Drops one pending cell, e.g. after the same decision was made elsewhere.
+    func discardPendingChange(filename: String, column: String) {
+        guard var entry = pendingChanges[filename] else { return }
+        entry.removeValue(forKey: column)
+        pendingChanges[filename] = entry.isEmpty ? nil : entry
+    }
+
     /// Writes pending changes to pvorg.json and returns how many cells were saved.
     @discardableResult
     func save(to appState: AppState) throws -> Int {

@@ -9,22 +9,32 @@ final class ToastCenter {
         let id = UUID()
         let message: String
         let systemImage: String
+        var actionTitle: String?
+        var action: (@MainActor () -> Void)?
+
+        static func == (lhs: Toast, rhs: Toast) -> Bool { lhs.id == rhs.id }
     }
 
     private(set) var current: Toast?
     @ObservationIgnored private var dismissTask: Task<Void, Never>?
 
-    func show(_ message: String, systemImage: String = "checkmark.circle.fill") {
-        let toast = Toast(message: message, systemImage: systemImage)
+    /// Shows a confirmation. With an action (e.g. Undo) it stays up longer so there's time to use it.
+    func show(_ message: String, systemImage: String = "checkmark.circle.fill", actionTitle: String? = nil, action: (@MainActor () -> Void)? = nil) {
+        let toast = Toast(message: message, systemImage: systemImage, actionTitle: actionTitle, action: action)
         current = toast
         AccessibilityNotification.Announcement(message).post()
 
         dismissTask?.cancel()
         dismissTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(2.6))
+            try? await Task.sleep(for: .seconds(action == nil ? 2.6 : 6))
             guard !Task.isCancelled, self?.current == toast else { return }
             self?.current = nil
         }
+    }
+
+    func dismiss() {
+        dismissTask?.cancel()
+        current = nil
     }
 }
 
@@ -41,6 +51,17 @@ struct ToastOverlay: View {
                         .accessibilityHidden(true)
                     Text(toast.message)
                         .font(.callout.weight(.medium))
+                        .lineLimit(2)
+                    if let title = toast.actionTitle, let action = toast.action {
+                        Button(title) {
+                            action()
+                            toasts.dismiss()
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(Color.accentColor)
+                        .fontWeight(.semibold)
+                        .padding(.leading, Spacing.xs)
+                    }
                 }
                 .padding(.horizontal, Spacing.lg)
                 .padding(.vertical, Spacing.sm + 2)
@@ -51,7 +72,7 @@ struct ToastOverlay: View {
         }
         .animation(.spring(duration: 0.35, bounce: 0.2), value: toasts.current)
         .padding(.bottom, Spacing.xl)
-        .allowsHitTesting(false)
+        .allowsHitTesting(toasts.current?.action != nil)
     }
 }
 

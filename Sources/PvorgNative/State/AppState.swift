@@ -27,6 +27,18 @@ struct AppNotice: Identifiable {
     let message: String
 }
 
+/// A video–gallery pairing excluded from the viewer, with what's needed to undo it.
+struct PairingExclusion {
+    let filename: String
+    let galleryName: String
+    /// The gallery decision before the exclusion (yes or undecided).
+    let previousState: TriState
+    /// Whether the video had a pvorg.json entry before; undo removes one it created.
+    let hadRelation: Bool
+    /// Where the pairing sat in `combinations`, if it was there.
+    let index: Int?
+}
+
 @Observable
 @MainActor
 final class AppState {
@@ -263,6 +275,79 @@ final class AppState {
 
     func saveMappings(_ kind: MappingKind, changes: [String: [String: TriState]]) throws {
         guard var config else { return }
+        applyMappingChanges(kind, changes, to: &config)
+        try ConfigService.saveConfig(config)
+        try rescanFromConfig(config, preserveSelections: true)
+    }
+
+    /// Writes "No" for the video's gallery to pvorg.json, exactly as Gallery
+    /// Mapping would, then drops the pairing from `combinations` without
+    /// reshuffling: the viewer moves on to the next combination in place.
+    func excludePairing(filename: String, galleryName: String) throws -> PairingExclusion {
+        guard var config else {
+            throw NSError(domain: "AppState", code: 5, userInfo: [NSLocalizedDescriptionKey: "Config not loaded yet."])
+        }
+        let relation = config.videoRelations[filename]
+        let previousState: TriState = relation?.yesGalleries.contains(galleryName) == true ? .yes
+            : relation?.noGalleries.contains(galleryName) == true ? .no
+            : .undecided
+
+        applyMappingChanges(.galleries, [filename: [galleryName: .no]], to: &config)
+        try ConfigService.saveConfig(config)
+        self.config = config
+        refreshRelatedGalleries(for: filename)
+
+        let index = combinations.firstIndex { $0.video.filename == filename && $0.gallery.name == galleryName }
+        if let index {
+            combinations.remove(at: index)
+            if index < combinationIndex {
+                combinationIndex -= 1
+            }
+            if combinationIndex >= combinations.count {
+                combinationIndex = 0
+            }
+        }
+        libraryRevision += 1
+        return PairingExclusion(filename: filename, galleryName: galleryName, previousState: previousState, hadRelation: relation != nil, index: index)
+    }
+
+    /// Undoes `excludePairing`: restores the previous decision and, if the
+    /// pairing passes the current filters, puts it back where it was and shows it.
+    func restorePairing(_ exclusion: PairingExclusion) throws {
+        guard var config else {
+            throw NSError(domain: "AppState", code: 6, userInfo: [NSLocalizedDescriptionKey: "Config not loaded yet."])
+        }
+        applyMappingChanges(.galleries, [exclusion.filename: [exclusion.galleryName: exclusion.previousState]], to: &config)
+        // Leave pvorg.json exactly as it was if the exclusion created the entry
+        // and nothing else has been decided for the video since.
+        if !exclusion.hadRelation, let relation = config.videoRelations[exclusion.filename],
+           [relation.galleries, relation.excludedGalleries, relation.tags, relation.excludedTags].allSatisfy({ $0?.isEmpty ?? true }) {
+            config.videoRelations.removeValue(forKey: exclusion.filename)
+        }
+        try ConfigService.saveConfig(config)
+        self.config = config
+        refreshRelatedGalleries(for: exclusion.filename)
+
+        if let video = videos.first(where: { $0.filename == exclusion.filename }),
+           let gallery = galleries.first(where: { $0.name == exclusion.galleryName }),
+           !combinations.contains(where: { $0.video.filename == video.filename && $0.gallery.name == gallery.name }),
+           CombinationEngine.includes(video, selectedStudios: selectedStudios, selectedTags: selectedTags, selectedCast: selectedCast),
+           CombinationEngine.includes(gallery, for: video, selectedGalleries: selectedGalleries) {
+            let index = min(exclusion.index ?? combinationIndex, combinations.count)
+            combinations.insert(Combination(video: video, gallery: gallery), at: index)
+            combinationIndex = index
+        }
+        libraryRevision += 1
+    }
+
+    /// Recomputes a video's galleries from config the same way the scanner does.
+    private func refreshRelatedGalleries(for filename: String) {
+        guard let index = videos.firstIndex(where: { $0.filename == filename }) else { return }
+        let excluded = Set(config?.videoRelations[filename]?.noGalleries ?? [])
+        videos[index].relatedGalleries = galleries.map(\.name).filter { !excluded.contains($0) }
+    }
+
+    private func applyMappingChanges(_ kind: MappingKind, _ changes: [String: [String: TriState]], to config: inout AppConfig) {
         let orderedKnownColumns = mappingColumns(kind)
         let knownColumns = Set(orderedKnownColumns)
 
@@ -303,9 +388,6 @@ final class AppState {
             }
             config.videoRelations[filename] = relation
         }
-
-        try ConfigService.saveConfig(config)
-        try rescanFromConfig(config, preserveSelections: true)
     }
 
     // MARK: - Loading

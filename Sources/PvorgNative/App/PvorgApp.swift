@@ -25,7 +25,7 @@ struct PvorgApp: App {
                 .environment(toasts)
                 .onAppear {
                     applyAppearance()
-                    keyboard.commands = CommandContext(appState: appState, navigation: navigation, viewer: viewer)
+                    keyboard.commands = CommandContext(appState: appState, navigation: navigation, viewer: viewer, mappings: mappings, toasts: toasts, keyboard: keyboard)
                 }
                 .onChange(of: appearance) { _, _ in applyAppearance() }
                 .task {
@@ -40,6 +40,7 @@ struct PvorgApp: App {
                 navigation: navigation,
                 viewer: viewer,
                 mappings: mappings,
+                keyboard: keyboard,
                 toasts: toasts
             )
         }
