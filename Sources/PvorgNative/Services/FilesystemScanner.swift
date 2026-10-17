@@ -61,8 +61,6 @@ enum FilesystemScanner {
         var videos: [Video] = []
         var skipped: [(String, [String])] = []
 
-        let allTags = config.tags
-
         for fileURL in entries {
             let filename = fileURL.lastPathComponent
             let validation = FilenameValidator.validate(filename)
@@ -75,11 +73,13 @@ enum FilesystemScanner {
             let parsed = FilenameValidator.parse(filename)
             let relation = config.videoRelations[filename]
 
+            // Galleries are opt-out: a video pairs with every gallery it isn't excluded from.
             let excludedGalleries = Set(relation?.noGalleries ?? [])
-            let excludedTags = Set(relation?.noTags ?? [])
-
             let relatedGalleries = galleryNames.filter { !excludedGalleries.contains($0) }
-            let tags = allTags.filter { !excludedTags.contains($0) }
+
+            // Tags are opt-in: a video has a tag only when it's explicitly marked "yes",
+            // so a required tag matches only videos tagged with it.
+            let tags = relation?.yesTags ?? []
 
             videos.append(Video(
                 filename: filename,
