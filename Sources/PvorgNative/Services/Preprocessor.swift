@@ -141,7 +141,8 @@ enum Preprocessor {
         let args = [
             "-v", "error",
             "-select_streams", "v:0",
-            "-show_entries", "stream=duration",
+            // Matroska and WebM report no per-stream duration, so fall back to the container's.
+            "-show_entries", "stream=duration:format=duration",
             "-of", "default=noprint_wrappers=1:nokey=1",
             videoURL.path,
         ]
@@ -155,7 +156,8 @@ enum Preprocessor {
         }
 
         let durationText = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let duration = Double(durationText), duration.isFinite else {
+        let candidates = durationText.split(whereSeparator: \.isNewline).compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+        guard let duration = candidates.first(where: { $0.isFinite && $0 > 0 }) else {
             throw ProcessError.executionFailed("ffprobe duration parse failed for \(videoURL.lastPathComponent). Raw: \(durationText)")
         }
         return duration
@@ -166,7 +168,7 @@ enum Preprocessor {
             "-v", "error",
             "-select_streams", "v:0",
             "-show_entries", "stream=duration,width,height,r_frame_rate",
-            "-show_entries", "format=size",
+            "-show_entries", "format=size,duration",
             "-of", "json",
             videoURL.path,
         ]
@@ -186,7 +188,10 @@ enum Preprocessor {
         let firstStream = streams.first ?? [:]
         let format = json["format"] as? [String: Any] ?? [:]
 
-        let duration = (firstStream["duration"] as? String).flatMap(Double.init) ?? (firstStream["duration"] as? Double) ?? 0
+        let duration = (firstStream["duration"] as? String).flatMap(Double.init)
+            ?? (firstStream["duration"] as? Double)
+            ?? (format["duration"] as? String).flatMap(Double.init)
+            ?? 0
         let width = firstStream["width"] as? Int ?? 0
         let height = firstStream["height"] as? Int ?? 0
         let fpsRaw = firstStream["r_frame_rate"] as? String ?? "0/1"
