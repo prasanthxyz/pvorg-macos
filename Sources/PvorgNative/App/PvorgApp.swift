@@ -30,6 +30,17 @@ struct PvorgApp: App {
                 .onChange(of: appearance) { _, _ in applyAppearance() }
                 .task {
                     appState.start()
+                    #if DEBUG
+                    await UITour.runIfRequested(
+                        appState: appState,
+                        navigation: navigation,
+                        viewer: viewer,
+                        library: library,
+                        mappings: mappings,
+                        keyboard: keyboard,
+                        toasts: toasts
+                    )
+                    #endif
                 }
         }
         .defaultSize(width: 1280, height: 820)
