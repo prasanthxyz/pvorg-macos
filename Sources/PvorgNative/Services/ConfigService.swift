@@ -1,13 +1,39 @@
 import Foundation
 
 enum ConfigService {
+    /// `~/pvorg.json`. `PVORG_CONFIG` overrides it so the app can be run
+    /// against a test library without touching the real one.
     static var configURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("pvorg.json")
+        if let override = ProcessInfo.processInfo.environment["PVORG_CONFIG"], !override.isEmpty {
+            return URL(fileURLWithPath: (override as NSString).expandingTildeInPath)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("pvorg.json")
     }
 
     static func loadConfig(from url: URL = configURL) throws -> AppConfig {
         let data = try Data(contentsOf: url)
-        return try JSONDecoder().decode(AppConfig.self, from: data)
+        do {
+            return try JSONDecoder().decode(AppConfig.self, from: data)
+        } catch let error as DecodingError {
+            throw NSError(domain: "ConfigService", code: 3, userInfo: [
+                NSLocalizedDescriptionKey: "\(url.lastPathComponent) isn’t valid: \(describe(error))",
+            ])
+        }
+    }
+
+    private static func describe(_ error: DecodingError) -> String {
+        func path(_ context: DecodingError.Context) -> String {
+            let keys = context.codingPath.map { $0.intValue.map { "[\($0)]" } ?? $0.stringValue }
+            return keys.isEmpty ? "" : " (at “\(keys.joined(separator: "."))”)"
+        }
+        switch error {
+        case .keyNotFound(let key, let context):
+            return "the required key “\(key.stringValue)” is missing\(path(context))."
+        case .typeMismatch(_, let context), .valueNotFound(_, let context), .dataCorrupted(let context):
+            return context.debugDescription.trimmingCharacters(in: CharacterSet(charactersIn: ".")) + path(context) + "."
+        @unknown default:
+            return error.localizedDescription
+        }
     }
 
     static func saveConfig(_ config: AppConfig, to url: URL = configURL) throws {

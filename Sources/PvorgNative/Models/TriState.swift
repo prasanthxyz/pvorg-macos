@@ -1,5 +1,4 @@
 import Foundation
-import SwiftUI
 
 enum TriState: String, Codable {
     case yes
@@ -14,27 +13,11 @@ enum TriState: String, Codable {
         }
     }
 
-    var symbol: String {
+    var title: String {
         switch self {
-        case .yes: "✓"
-        case .no: "✗"
-        case .undecided: "—"
-        }
-    }
-
-    var foregroundColor: Color {
-        switch self {
-        case .yes: .white
-        case .no: .white
-        case .undecided: .textSecondary
-        }
-    }
-
-    var backgroundColor: Color {
-        switch self {
-        case .yes: .stateYes
-        case .no: .stateNo
-        case .undecided: .tagBg
+        case .yes: "Yes"
+        case .no: "No"
+        case .undecided: "Undecided"
         }
     }
 }

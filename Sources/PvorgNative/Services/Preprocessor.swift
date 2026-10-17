@@ -1,5 +1,11 @@
 import Foundation
 
+struct PreprocessProgress: Sendable {
+    let completed: Int
+    let total: Int
+    let filename: String
+}
+
 enum Preprocessor {
     private static let tgpCols = 4
     private static let tgpRows = 4
@@ -8,7 +14,7 @@ enum Preprocessor {
     static func run(
         videos: [Video],
         videosPath: String,
-        progress: @escaping @Sendable (String) async -> Void
+        progress: @escaping @Sendable (PreprocessProgress) async -> Void
     ) async {
         var tgpGenerated = 0
         var tgpExisting = 0
@@ -31,7 +37,7 @@ enum Preprocessor {
 
         for (index, video) in videos.enumerated() {
             let progressMessage = "Processing \(index + 1)/\(videos.count): \(video.filename)"
-            await progress(progressMessage)
+            await progress(PreprocessProgress(completed: index, total: videos.count, filename: video.filename))
             Log.preprocess.info("\(progressMessage, privacy: .public)")
             print(progressMessage)
 
@@ -87,8 +93,6 @@ enum Preprocessor {
         """
         Log.preprocess.info("\(summary, privacy: .public)")
         print(summary)
-
-        await progress("")
     }
 
     static func generateTGP(videoURL: URL, outputURL: URL) async throws {

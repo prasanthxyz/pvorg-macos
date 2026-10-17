@@ -1,48 +1,85 @@
-import AppKit
 import SwiftUI
 
+/// The gallery half of a combination: its images in a random order, advancing
+/// every two seconds with a short crossfade.
 struct GallerySlideshowView: View {
-    let images: [URL]
+    let gallery: Gallery
 
-    @State private var shuffledImages: [URL] = []
-    @State private var currentIndex = 0
+    @State private var order: [URL] = []
+    @State private var index = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private let interval: Duration = .seconds(2)
 
     var body: some View {
-        Group {
-            if shuffledImages.isEmpty {
-                Text("No images")
-                    .foregroundStyle(.secondary)
-            } else if let image = NSImage(contentsOf: shuffledImages[currentIndex]) {
-                Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .id(shuffledImages[currentIndex].path)
-                    .transition(.opacity)
-                    .animation(.easeInOut(duration: 0.3), value: currentIndex)
+        ZStack {
+            Color.stage
+
+            if order.isEmpty {
+                VStack(spacing: Spacing.sm) {
+                    Image(systemName: "photo.on.rectangle")
+                        .font(.title)
+                    Text("No Images")
+                        .font(.headline)
+                    Text("This gallery folder is empty.")
+                        .font(.callout)
+                }
+                .foregroundStyle(Color.stageSecondary)
+                .multilineTextAlignment(.center)
+                .padding(Spacing.lg)
             } else {
-                Text("Image load failed")
-                    .foregroundStyle(.secondary)
+                AsyncThumbnail(url: order[index], maxPixelSize: ImageSize.large, contentMode: .fit, placeholder: .stage)
+                    .id(order[index])
+                    .transition(.opacity)
+                    .accessibilityLabel("Image \(index + 1) of \(order.count) from \(gallery.name)")
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear {
-            reshuffle()
+        .overlay(alignment: .bottom) {
+            caption
         }
-        .onChange(of: images) { _, _ in
-            reshuffle()
-        }
-        .task(id: shuffledImages.map(\.path).joined(separator: "|")) {
-            guard shuffledImages.count > 1 else { return }
+        .clipped()
+        .task(id: gallery) {
+            order = gallery.imageFiles.shuffled()
+            index = 0
+            guard !order.isEmpty else { return }
+            ImagePipeline.shared.prefetch(order[0], maxPixelSize: ImageSize.large)
+            guard order.count > 1 else { return }
+
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                if Task.isCancelled { return }
-                currentIndex = (currentIndex + 1) % shuffledImages.count
+                let next = (index + 1) % order.count
+                // Decode the next image before switching so the fade never shows a blank frame.
+                async let decoded = ImagePipeline.shared.image(for: order[next], maxPixelSize: ImageSize.large)
+                try? await Task.sleep(for: interval)
+                _ = await decoded
+                guard !Task.isCancelled else { return }
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.3)) {
+                    index = next
+                }
             }
         }
     }
 
-    private func reshuffle() {
-        shuffledImages = images.shuffled()
-        currentIndex = 0
+    private var caption: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+            Text(gallery.name)
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(Color.stagePrimary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: Spacing.xs)
+            if !order.isEmpty {
+                Text("\(index + 1) of \(order.count)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(Color.stageSecondary)
+                    .contentTransition(.numericText())
+            }
+        }
+        .padding(.horizontal, Spacing.md)
+        .padding(.top, Spacing.xl)
+        .padding(.bottom, Spacing.sm + 2)
+        .background {
+            LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .top, endPoint: .bottom)
+        }
+        .accessibilityElement(children: .combine)
     }
 }

@@ -7,6 +7,14 @@ struct StartupReport {
     var orphanAssetsRemoved: Int = 0
 }
 
+/// What the loading screen shows while the startup pipeline runs.
+struct StartupProgress: Equatable {
+    var title: String
+    var detail: String? = nil
+    /// `nil` while the current step has no measurable progress.
+    var fraction: Double? = nil
+}
+
 struct SkippedFile: Identifiable {
     let id = UUID()
     let filename: String
@@ -24,15 +32,23 @@ struct AppNotice: Identifiable {
 final class AppState {
     // Lifecycle
     var isReady: Bool = false
-    var progressText: String = "Starting up..."
+    var startupProgress = StartupProgress(title: "Starting Up")
     var fatalError: String? = nil
 
     // Data
     var config: AppConfig? = nil
-    var videos: [Video] = []
+    var videos: [Video] = [] {
+        didSet { sortedVideos = VideoDisplaySort.sorted(videos) }
+    }
     var galleries: [Gallery] = []
     var combinations: [Combination] = []
     var combinationIndex: Int = 0
+
+    /// `videos` in display order, computed once per change instead of per render.
+    private(set) var sortedVideos: [Video] = []
+    /// Bumped whenever the library is (re)loaded from disk or config, so
+    /// screens holding derived data know to refresh it.
+    private(set) var libraryRevision = 0
 
     // Selections
     var selectedGalleries: Set<String> = []
@@ -70,6 +86,14 @@ final class AppState {
         return combinations[combinationIndex]
     }
 
+    /// True when every gallery and studio is included and no tag or cast is required.
+    var filtersAreDefault: Bool {
+        selectedGalleries == Set(allGalleryNames)
+            && selectedStudios == Set(allStudios)
+            && selectedTags.isEmpty
+            && selectedCast.isEmpty
+    }
+
     func start() {
         Task(priority: .userInitiated) {
             await runStartupPipeline()
@@ -100,32 +124,20 @@ final class AppState {
         staleCleanupPreview = nil
     }
 
-    func confirmStaleConfigCleanup() {
-        do {
-            guard var config else {
-                throw NSError(domain: "AppState", code: 3, userInfo: [NSLocalizedDescriptionKey: "Config not loaded yet."])
-            }
-            guard let preview = staleCleanupPreview else {
-                throw NSError(domain: "AppState", code: 4, userInfo: [NSLocalizedDescriptionKey: "No cleanup preview is available."])
-            }
-
-            let removed = CleanupService.removeConfigEntries(config: &config, keys: preview.staleEntries)
-            try ConfigService.saveConfig(config)
-            try rescanFromConfig(config, preserveSelections: true)
-
-            staleCleanupPreview = nil
-            appNotice = AppNotice(
-                title: "Cleanup Complete",
-                message: removed == 0
-                    ? "No stale entries were found."
-                    : "Removed \(removed) stale config entr\(removed == 1 ? "y" : "ies")."
-            )
-        } catch {
-            appNotice = AppNotice(
-                title: "Cleanup Failed",
-                message: error.localizedDescription
-            )
+    /// Removes the previewed stale entries and returns how many were removed.
+    func confirmStaleConfigCleanup() throws -> Int {
+        guard var config else {
+            throw NSError(domain: "AppState", code: 3, userInfo: [NSLocalizedDescriptionKey: "Config not loaded yet."])
         }
+        guard let preview = staleCleanupPreview else {
+            throw NSError(domain: "AppState", code: 4, userInfo: [NSLocalizedDescriptionKey: "No cleanup preview is available."])
+        }
+
+        let removed = CleanupService.removeConfigEntries(config: &config, keys: preview.staleEntries)
+        try ConfigService.saveConfig(config)
+        try rescanFromConfig(config, preserveSelections: true)
+        staleCleanupPreview = nil
+        return removed
     }
 
     func nextCombination() {
@@ -136,6 +148,11 @@ final class AppState {
     func previousCombination() {
         guard !combinations.isEmpty else { return }
         combinationIndex = (combinationIndex - 1 + combinations.count) % combinations.count
+    }
+
+    func showCombination(at index: Int) {
+        guard combinations.indices.contains(index) else { return }
+        combinationIndex = index
     }
 
     func regenerateCombinations() {
@@ -153,6 +170,15 @@ final class AppState {
     func shuffleCombinations() {
         combinations.shuffle()
         combinationIndex = 0
+    }
+
+    /// Restores the startup selection: everything included, nothing required.
+    func resetFilters() {
+        selectedGalleries = Set(allGalleryNames)
+        selectedStudios = Set(allStudios)
+        selectedTags = []
+        selectedCast = []
+        regenerateCombinations()
     }
 
     func tgpURL(for filename: String) -> URL? {
@@ -178,17 +204,34 @@ final class AppState {
         return result
     }
 
-    func galleryMappingPage(page: Int, pageSize: Int, hideDecided: Bool) -> MappingPageData {
-        guard let config else { return .empty(pageSize: pageSize) }
-        let columns = allGalleryNames
-        guard !columns.isEmpty else { return .empty(pageSize: pageSize) }
+    // MARK: - Mapping
+
+    func mappingColumns(_ kind: MappingKind) -> [String] {
+        switch kind {
+        case .galleries: allGalleryNames
+        case .tags: allTags
+        }
+    }
+
+    /// Every video with its saved decision per column, in display order.
+    /// `hideDecided` drops videos with a yes/no for every column; `query`
+    /// matches title, studio, cast and filename.
+    func mappingRows(_ kind: MappingKind, hideDecided: Bool, query: String = "") -> [MappingVideoRow] {
+        guard let config else { return [] }
+        let columns = mappingColumns(kind)
+        guard !columns.isEmpty else { return [] }
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
 
         var rows: [MappingVideoRow] = []
 
-        for video in videos {
+        for video in sortedVideos {
+            if !query.isEmpty && !video.matches(query) {
+                continue
+            }
+
             let relation = config.videoRelations[video.filename] ?? VideoRelation()
-            let yes = Set(relation.yesGalleries)
-            let no = Set(relation.noGalleries)
+            let yes = Set(relation[keyPath: kind.yesKeyPath] ?? [])
+            let no = Set(relation[keyPath: kind.noKeyPath] ?? [])
 
             var map: [String: TriState] = [:]
             for column in columns {
@@ -209,75 +252,19 @@ final class AppState {
                 filename: video.filename,
                 title: video.title,
                 studio: video.studio,
+                actors: video.actors,
                 tgpURL: tgpURL(for: video.filename),
                 map: map
             ))
         }
 
-        rows = VideoDisplaySort.sorted(rows)
-
-        let total = rows.count
-        let totalPages = max(1, Int(ceil(Double(total) / Double(pageSize))))
-        let clampedPage = min(max(page, 1), totalPages)
-        let start = (clampedPage - 1) * pageSize
-        let end = min(start + pageSize, rows.count)
-        let pageRows = start < end ? Array(rows[start..<end]) : []
-
-        return MappingPageData(total: total, page: clampedPage, pageSize: pageSize, columns: columns, videos: pageRows)
+        return rows
     }
 
-    func tagMappingPage(page: Int, pageSize: Int, hideDecided: Bool) -> MappingPageData {
-        guard let config else { return .empty(pageSize: pageSize) }
-        let columns = allTags
-        guard !columns.isEmpty else { return .empty(pageSize: pageSize) }
-
-        var rows: [MappingVideoRow] = []
-
-        for video in videos {
-            let relation = config.videoRelations[video.filename] ?? VideoRelation()
-            let yes = Set(relation.yesTags)
-            let no = Set(relation.noTags)
-
-            var map: [String: TriState] = [:]
-            for column in columns {
-                if yes.contains(column) {
-                    map[column] = .yes
-                } else if no.contains(column) {
-                    map[column] = .no
-                } else {
-                    map[column] = .undecided
-                }
-            }
-
-            if hideDecided && map.values.allSatisfy({ $0 != .undecided }) {
-                continue
-            }
-
-            rows.append(MappingVideoRow(
-                filename: video.filename,
-                title: video.title,
-                studio: video.studio,
-                tgpURL: tgpURL(for: video.filename),
-                map: map
-            ))
-        }
-
-        rows = VideoDisplaySort.sorted(rows)
-
-        let total = rows.count
-        let totalPages = max(1, Int(ceil(Double(total) / Double(pageSize))))
-        let clampedPage = min(max(page, 1), totalPages)
-        let start = (clampedPage - 1) * pageSize
-        let end = min(start + pageSize, rows.count)
-        let pageRows = start < end ? Array(rows[start..<end]) : []
-
-        return MappingPageData(total: total, page: clampedPage, pageSize: pageSize, columns: columns, videos: pageRows)
-    }
-
-    func saveGalleryMappings(_ changes: [String: [String: TriState]]) throws {
+    func saveMappings(_ kind: MappingKind, changes: [String: [String: TriState]]) throws {
         guard var config else { return }
-        let knownColumns = Set(allGalleryNames)
-        let orderedKnownColumns = allGalleryNames
+        let orderedKnownColumns = mappingColumns(kind)
+        let knownColumns = Set(orderedKnownColumns)
 
         for (filename, fileChanges) in changes {
             var relation = config.videoRelations[filename] ?? VideoRelation(
@@ -287,8 +274,10 @@ final class AppState {
                 excludedTags: []
             )
 
-            var yes = Set(relation.galleries ?? [])
-            var no = Set(relation.excludedGalleries ?? [])
+            let originalYes = relation[keyPath: kind.yesKeyPath] ?? []
+            let originalNo = relation[keyPath: kind.noKeyPath] ?? []
+            var yes = Set(originalYes)
+            var no = Set(originalNo)
 
             for (column, state) in fileChanges where knownColumns.contains(column) {
                 switch state {
@@ -304,63 +293,22 @@ final class AppState {
                 }
             }
 
-            let preservedUnknownYes = (relation.galleries ?? []).filter { !knownColumns.contains($0) && yes.contains($0) }
-            let preservedUnknownNo = (relation.excludedGalleries ?? []).filter { !knownColumns.contains($0) && no.contains($0) }
+            let preservedUnknownYes = originalYes.filter { !knownColumns.contains($0) && yes.contains($0) }
+            let preservedUnknownNo = originalNo.filter { !knownColumns.contains($0) && no.contains($0) }
 
-            relation.galleries = orderedKnownColumns.filter { yes.contains($0) } + preservedUnknownYes
-            relation.excludedGalleries = orderedKnownColumns.filter { no.contains($0) } + preservedUnknownNo
-            relation.tags = relation.tags ?? []
-            relation.excludedTags = relation.excludedTags ?? []
-            config.videoRelations[filename] = relation
-        }
-
-        try ConfigService.saveConfig(config)
-        try rescanFromConfig(config, preserveSelections: true)
-    }
-
-    func saveTagMappings(_ changes: [String: [String: TriState]]) throws {
-        guard var config else { return }
-        let knownColumns = Set(allTags)
-        let orderedKnownColumns = allTags
-
-        for (filename, fileChanges) in changes {
-            var relation = config.videoRelations[filename] ?? VideoRelation(
-                galleries: [],
-                excludedGalleries: [],
-                tags: [],
-                excludedTags: []
-            )
-
-            var yes = Set(relation.tags ?? [])
-            var no = Set(relation.excludedTags ?? [])
-
-            for (column, state) in fileChanges where knownColumns.contains(column) {
-                switch state {
-                case .yes:
-                    yes.insert(column)
-                    no.remove(column)
-                case .no:
-                    no.insert(column)
-                    yes.remove(column)
-                case .undecided:
-                    yes.remove(column)
-                    no.remove(column)
-                }
+            relation[keyPath: kind.yesKeyPath] = orderedKnownColumns.filter { yes.contains($0) } + preservedUnknownYes
+            relation[keyPath: kind.noKeyPath] = orderedKnownColumns.filter { no.contains($0) } + preservedUnknownNo
+            for keyPath in kind.preservedKeyPaths {
+                relation[keyPath: keyPath] = relation[keyPath: keyPath] ?? []
             }
-
-            let preservedUnknownYes = (relation.tags ?? []).filter { !knownColumns.contains($0) && yes.contains($0) }
-            let preservedUnknownNo = (relation.excludedTags ?? []).filter { !knownColumns.contains($0) && no.contains($0) }
-
-            relation.tags = orderedKnownColumns.filter { yes.contains($0) } + preservedUnknownYes
-            relation.excludedTags = orderedKnownColumns.filter { no.contains($0) } + preservedUnknownNo
-            relation.galleries = relation.galleries ?? []
-            relation.excludedGalleries = relation.excludedGalleries ?? []
             config.videoRelations[filename] = relation
         }
 
         try ConfigService.saveConfig(config)
         try rescanFromConfig(config, preserveSelections: true)
     }
+
+    // MARK: - Loading
 
     private func runStartupPipeline() async {
         guard await pipelineGuard.claim() else {
@@ -375,16 +323,16 @@ final class AppState {
             fatalError = nil
             isReady = false
 
-            progressText = "Loading configuration..."
+            startupProgress = StartupProgress(title: "Loading Configuration", detail: ConfigService.configURL.path)
             var config = try ConfigService.loadConfig()
 
-            progressText = "Scanning filesystem..."
+            startupProgress = StartupProgress(title: "Scanning Library", detail: config.videosPath)
             var galleries = try FilesystemScanner.scanGalleries(config: config)
             var scan = try FilesystemScanner.scanVideos(config: config, galleryNames: galleries.map(\.name))
             var videos = scan.videos
             var skipped = scan.skipped
 
-            progressText = "Normalizing pvorg.json..."
+            startupProgress = StartupProgress(title: "Updating pvorg.json")
             let normalized = ConfigService.normalizeRelations(&config)
             if normalized > 0 {
                 try ConfigService.saveConfig(config)
@@ -394,18 +342,20 @@ final class AppState {
                 skipped = scan.skipped
             }
 
-            progressText = "Cleaning orphaned assets..."
+            startupProgress = StartupProgress(title: "Cleaning Up Previews")
             let orphaned = CleanupService.cleanupOrphanedTGPAssets(
                 videosPath: config.videosPath,
                 validFilenames: Set(videos.map(\.filename))
             )
 
-            progressText = "Running preprocessing..."
-            await Preprocessor.run(videos: videos, videosPath: config.videosPath) { message in
+            startupProgress = StartupProgress(title: "Preparing Previews", fraction: 0)
+            await Preprocessor.run(videos: videos, videosPath: config.videosPath) { progress in
                 await MainActor.run {
-                    if !message.isEmpty {
-                        self.progressText = message
-                    }
+                    self.startupProgress = StartupProgress(
+                        title: "Preparing Previews",
+                        detail: "\(progress.completed + 1) of \(progress.total) · \(progress.filename)",
+                        fraction: Double(progress.completed) / Double(max(progress.total, 1))
+                    )
                 }
             }
 
@@ -431,10 +381,9 @@ final class AppState {
             Orphan assets removed:        \(orphaned)
             """)
 
-            progressText = ""
             isReady = true
         } catch {
-            fatalError = "Startup failed: \(error.localizedDescription)"
+            fatalError = error.localizedDescription
             Log.pipeline.error("Startup pipeline failed: \(error.localizedDescription, privacy: .public)")
         }
     }
@@ -483,5 +432,14 @@ final class AppState {
         }
 
         regenerateCombinations()
+        libraryRevision += 1
+    }
+}
+
+extension Video {
+    /// Case- and diacritic-insensitive match against everything the UI shows for a video.
+    func matches(_ query: String) -> Bool {
+        let fields = [DisplayName.title(for: self), filename, DisplayName.humanize(studio)] + actors.map(DisplayName.humanize)
+        return fields.contains { $0.localizedStandardContains(query) }
     }
 }

@@ -6,67 +6,93 @@ struct StaleConfigCleanupSheet: View {
     let onConfirm: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Clean Stale Config Entries")
-                .font(.title2)
-                .bold()
+        VStack(alignment: .leading, spacing: Spacing.lg) {
+            header
 
-            VStack(alignment: .leading, spacing: 8) {
-                detailRow(label: "Videos path", value: preview.videosPath)
-                detailRow(label: "Video files on disk", value: "\(preview.videoFileCount)")
-                detailRow(label: "Config entries", value: "\(preview.totalRelationCount)")
-                detailRow(label: "Stale entries", value: "\(preview.staleEntryCount)")
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: Spacing.lg, verticalSpacing: Spacing.sm) {
+                summaryRow("Videos folder", (preview.videosPath as NSString).abbreviatingWithTildeInPath, selectable: true)
+                summaryRow("Videos on disk", preview.videoFileCount.formatted())
+                summaryRow("Entries in pvorg.json", preview.totalRelationCount.formatted())
+                summaryRow("Stale entries", preview.staleEntryCount.formatted())
             }
+            .font(.callout)
 
             if preview.isHighRisk {
-                Text("Warning: zero video files are currently visible on disk while pvorg.json still contains mappings. If a device is unmounted or a path is temporarily unavailable, confirming this cleanup will permanently delete manual mapping decisions.")
-                    .foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
+                Callout(
+                    tone: .critical,
+                    title: "No videos are visible in the videos folder",
+                    message: "If a drive is disconnected or the folder is temporarily unavailable, removing these entries permanently deletes your mapping decisions."
+                )
             }
 
-            if preview.staleEntries.isEmpty {
-                Text("No stale entries were found.")
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("Entries that would be removed")
-                    .font(.headline)
-
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(preview.staleEntries, id: \.self) { entry in
-                            Text(entry)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 8)
-                                .background(Color.tagBg)
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                        }
+            if !preview.staleEntries.isEmpty {
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    Text("Entries to Remove")
+                        .font(.headline)
+                    List(preview.staleEntries, id: \.self) { entry in
+                        Text(entry)
+                            .font(.callout)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                            .help(entry)
                     }
+                    .listStyle(.bordered(alternatesRowBackgrounds: true))
+                    .frame(minHeight: 120, idealHeight: min(CGFloat(preview.staleEntries.count) * 24 + 8, 260), maxHeight: 260)
                 }
-                .frame(minHeight: 180, maxHeight: 320)
             }
 
             HStack {
                 Spacer()
-                Button("Cancel", action: onCancel)
-                if preview.staleEntryCount > 0 {
-                    Button("Remove \(preview.staleEntryCount) Stale Entr\(preview.staleEntryCount == 1 ? "y" : "ies")", role: .destructive, action: onConfirm)
+                if preview.staleEntries.isEmpty {
+                    Button("Done", action: onCancel)
+                        .keyboardShortcut(.defaultAction)
+                } else {
+                    Button("Cancel", action: onCancel)
+                        .keyboardShortcut(.cancelAction)
+                    Button("Remove \(preview.staleEntryCount.counted("Entry", "Entries"))", role: .destructive, action: onConfirm)
+                        // Never the default button when the cleanup could wipe real data.
+                        .keyboardShortcut(preview.isHighRisk ? nil : .defaultAction)
                 }
             }
         }
-        .padding(20)
-        .frame(width: 680)
-        .background(Color.bgPrimary)
+        .padding(Spacing.xl)
+        .frame(width: 560)
     }
 
-    private func detailRow(label: String, value: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+    private var header: some View {
+        HStack(alignment: .top, spacing: Spacing.md) {
+            Image(systemName: preview.staleEntries.isEmpty ? "checkmark.circle" : "doc.badge.gearshape")
+                .font(.system(size: 30))
+                .foregroundStyle(preview.staleEntries.isEmpty ? Color.decisionYes : Color.accentColor)
+                .frame(width: 36)
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                Text(preview.staleEntries.isEmpty ? "No Stale Entries" : "Clean Up Stale Entries")
+                    .font(.title3.weight(.semibold))
+                Text(preview.staleEntries.isEmpty
+                    ? "Every entry in pvorg.json matches a video in your videos folder."
+                    : "These pvorg.json entries refer to videos that are no longer in your videos folder. Removing them doesn’t touch any files.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func summaryRow(_ label: String, _ value: String, selectable: Bool = false) -> some View {
+        GridRow {
             Text(label)
                 .foregroundStyle(.secondary)
-                .frame(width: 140, alignment: .leading)
-            Text(value)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .gridColumnAlignment(.trailing)
+            Group {
+                if selectable {
+                    Text(value).textSelection(.enabled)
+                } else {
+                    Text(value).monospacedDigit()
+                }
+            }
+            .lineLimit(1)
+            .truncationMode(.middle)
         }
     }
 }

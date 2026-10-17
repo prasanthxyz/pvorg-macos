@@ -1,6 +1,10 @@
 import AppKit
 import SwiftUI
 
+/// Shows a large floating contact sheet near the pointer while hovering a
+/// thumbnail. Like tooltips, the first preview waits briefly so sweeping the
+/// pointer across a grid doesn't flash panels; once one is showing, moving to
+/// a neighbor swaps instantly.
 struct HoverPreviewModifier: ViewModifier {
     let imageURL: URL?
 
@@ -9,23 +13,17 @@ struct HoverPreviewModifier: ViewModifier {
             .onContinuousHover { phase in
                 switch phase {
                 case .active:
-                    Task { @MainActor in
-                        guard let imageURL else {
-                            HoverPreviewWindow.shared.hide()
-                            return
-                        }
-                        HoverPreviewWindow.shared.show(imageURL: imageURL)
-                    }
-                case .ended:
-                    Task { @MainActor in
+                    if let imageURL {
+                        HoverPreviewWindow.shared.hover(imageURL)
+                    } else {
                         HoverPreviewWindow.shared.hide()
                     }
+                case .ended:
+                    HoverPreviewWindow.shared.hide()
                 }
             }
             .onDisappear {
-                Task { @MainActor in
-                    HoverPreviewWindow.shared.hide()
-                }
+                HoverPreviewWindow.shared.hide()
             }
     }
 }
@@ -40,15 +38,21 @@ extension View {
 private final class HoverPreviewWindow {
     static let shared = HoverPreviewWindow()
 
-    private let previewSize = NSSize(width: 920, height: 518)
+    private let maxSize = NSSize(width: 920, height: 518)
+    private let inset: CGFloat = 6
+    private let initialDelay: Duration = .milliseconds(220)
+    /// After hiding, a new hover within this window shows immediately.
+    private let warmInterval: TimeInterval = 0.4
+
     private let panel: NSPanel
-    private let containerView: NSView
     private let imageView: NSImageView
-    private let imageCache = NSCache<NSString, NSImage>()
+    private var hoveredURL: URL?
+    private var showTask: Task<Void, Never>?
+    private var lastHidden = Date.distantPast
 
     private init() {
         panel = NSPanel(
-            contentRect: NSRect(origin: .zero, size: previewSize),
+            contentRect: NSRect(origin: .zero, size: maxSize),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: true
@@ -60,78 +64,88 @@ private final class HoverPreviewWindow {
         panel.isOpaque = false
         panel.ignoresMouseEvents = true
         panel.hidesOnDeactivate = false
+        panel.appearance = NSAppearance(named: .darkAqua)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
 
-        containerView = NSView(frame: NSRect(origin: .zero, size: previewSize))
-        containerView.wantsLayer = true
-        containerView.layer?.masksToBounds = true
-        containerView.layer?.cornerRadius = 10
-        containerView.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.96).cgColor
-        containerView.layer?.borderColor = NSColor.white.withAlphaComponent(0.35).cgColor
-        containerView.layer?.borderWidth = 1
+        let background = NSVisualEffectView(frame: NSRect(origin: .zero, size: maxSize))
+        background.material = .hudWindow
+        background.blendingMode = .behindWindow
+        background.state = .active
+        background.wantsLayer = true
+        background.layer?.cornerRadius = Radius.large
+        background.layer?.cornerCurve = .continuous
+        background.layer?.masksToBounds = true
+        background.layer?.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
+        background.layer?.borderWidth = 1
 
-        let imageFrame = containerView.bounds.insetBy(dx: 12, dy: 12)
-        imageView = NSImageView(frame: imageFrame)
+        imageView = NSImageView(frame: background.bounds.insetBy(dx: inset, dy: inset))
         imageView.autoresizingMask = [.width, .height]
         imageView.imageAlignment = .alignCenter
         imageView.imageScaling = .scaleProportionallyUpOrDown
-        containerView.addSubview(imageView)
+        imageView.wantsLayer = true
+        imageView.layer?.cornerRadius = Radius.medium
+        imageView.layer?.cornerCurve = .continuous
+        imageView.layer?.masksToBounds = true
+        background.addSubview(imageView)
 
-        panel.contentView = containerView
+        panel.contentView = background
     }
 
-    func show(imageURL: URL) {
-        let key = imageURL.path as NSString
-        let image: NSImage
-        if let cached = imageCache.object(forKey: key) {
-            image = cached
-        } else {
-            guard let loaded = NSImage(contentsOf: imageURL) else {
-                hide()
+    func hover(_ url: URL) {
+        if panel.isVisible, hoveredURL == url {
+            positionNearMouse()
+            return
+        }
+        hoveredURL = url
+        showTask?.cancel()
+
+        let isWarm = panel.isVisible || Date().timeIntervalSince(lastHidden) < warmInterval
+        showTask = Task { [weak self, initialDelay] in
+            if !isWarm {
+                try? await Task.sleep(for: initialDelay)
+            }
+            guard let self, !Task.isCancelled, self.hoveredURL == url else { return }
+            guard let image = await ImagePipeline.shared.image(for: url, maxPixelSize: ImageSize.large) else {
+                self.hide()
                 return
             }
-            imageCache.setObject(loaded, forKey: key)
-            image = loaded
+            guard !Task.isCancelled, self.hoveredURL == url else { return }
+            self.imageView.image = image
+            self.positionNearMouse(fitting: image.size)
+            self.panel.orderFrontRegardless()
         }
-
-        imageView.image = image
-        positionNearMouse()
-        panel.orderFrontRegardless()
     }
 
     func hide() {
+        showTask?.cancel()
+        showTask = nil
+        hoveredURL = nil
+        if panel.isVisible {
+            lastHidden = Date()
+        }
         panel.orderOut(nil)
     }
 
-    private func positionNearMouse() {
+    private func positionNearMouse(fitting imageSize: NSSize? = nil) {
         let mouse = NSEvent.mouseLocation
-        let screen = screen(containing: mouse) ?? NSScreen.main ?? NSScreen.screens.first
-        guard let screen else { return }
-
+        guard let screen = NSScreen.screens.first(where: { NSMouseInRect(mouse, $0.frame, false) }) ?? NSScreen.main else { return }
         let visible = screen.visibleFrame
-        let width = previewSize.width
-        let height = previewSize.height
+
+        var size = panel.frame.size
+        if let imageSize, imageSize.width > 0, imageSize.height > 0 {
+            // Size the panel to the image's aspect ratio, capped to the max size and the screen.
+            let limit = NSSize(width: min(maxSize.width, visible.width * 0.6), height: min(maxSize.height, visible.height * 0.7))
+            let scale = min(limit.width / imageSize.width, limit.height / imageSize.height)
+            size = NSSize(width: (imageSize.width * scale).rounded() + inset * 2, height: (imageSize.height * scale).rounded() + inset * 2)
+        }
 
         var x = mouse.x + 24
-        var y = mouse.y - height - 18
+        var y = mouse.y - size.height - 18
+        if x + size.width > visible.maxX - 8 { x = mouse.x - size.width - 24 }
+        if x < visible.minX + 8 { x = visible.minX + 8 }
+        if y < visible.minY + 8 { y = mouse.y + 24 }
+        if y + size.height > visible.maxY - 8 { y = visible.maxY - size.height - 8 }
 
-        if x + width > visible.maxX - 8 {
-            x = mouse.x - width - 24
-        }
-        if x < visible.minX + 8 {
-            x = visible.minX + 8
-        }
-        if y < visible.minY + 8 {
-            y = mouse.y + 24
-        }
-        if y + height > visible.maxY - 8 {
-            y = visible.maxY - height - 8
-        }
-
-        panel.setFrame(NSRect(x: x, y: y, width: width, height: height), display: true)
-    }
-
-    private func screen(containing point: NSPoint) -> NSScreen? {
-        NSScreen.screens.first { NSMouseInRect(point, $0.frame, false) }
+        panel.setFrame(NSRect(x: x, y: y, width: size.width, height: size.height), display: true)
     }
 }

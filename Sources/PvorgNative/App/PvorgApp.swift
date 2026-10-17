@@ -1,123 +1,57 @@
+import AppKit
 import SwiftUI
 
 @main
 struct PvorgApp: App {
     @State private var appState = AppState()
-    @State private var currentPage: Page = .viewer
+    @State private var navigation = AppNavigation()
+    @State private var viewer = ViewerModel()
+    @State private var library = LibraryModel()
+    @State private var mappings = MappingStore()
+    @State private var keyboard = KeyboardContext()
+    @State private var toasts = ToastCenter()
+
+    @AppStorage(AppearancePreference.storageKey) private var appearance: AppearancePreference = .dark
 
     var body: some Scene {
         WindowGroup {
-            ContentView(currentPage: $currentPage)
+            RootView()
                 .environment(appState)
-                .preferredColorScheme(.dark)
+                .environment(navigation)
+                .environment(viewer)
+                .environment(library)
+                .environment(mappings)
+                .environment(keyboard)
+                .environment(toasts)
+                .onAppear {
+                    applyAppearance()
+                    keyboard.commands = CommandContext(appState: appState, navigation: navigation, viewer: viewer)
+                }
+                .onChange(of: appearance) { _, _ in applyAppearance() }
                 .task {
                     appState.start()
                 }
         }
-        .defaultSize(width: 1200, height: 800)
+        .defaultSize(width: 1280, height: 820)
+        .windowToolbarStyle(.unified)
         .commands {
-            CommandMenu("Navigate") {
-                Button("Viewer") {
-                    currentPage = .viewer
-                }
-                .keyboardShortcut("v", modifiers: [])
-
-                Button("Config") {
-                    currentPage = .config
-                }
-                .keyboardShortcut("c", modifiers: [])
-            }
-
-            CommandMenu("Viewer") {
-                Button("Toggle TGP/Video") {
-                    NotificationCenter.default.post(name: ViewerNotifications.toggleMode, object: nil)
-                }
-                .keyboardShortcut("p", modifiers: [])
-
-                Button("Previous Combination") {
-                    NotificationCenter.default.post(name: ViewerNotifications.previous, object: nil)
-                }
-                .keyboardShortcut("b", modifiers: [])
-
-                Button("Next Combination") {
-                    NotificationCenter.default.post(name: ViewerNotifications.next, object: nil)
-                }
-                .keyboardShortcut("n", modifiers: [])
-
-                Button("Play/Pause") {
-                    NotificationCenter.default.post(name: ViewerNotifications.playPause, object: nil)
-                }
-                .keyboardShortcut(.space, modifiers: [])
-
-                Button("Seek -10s") {
-                    NotificationCenter.default.post(name: ViewerNotifications.seekRelative, object: -10.0)
-                }
-                .keyboardShortcut(.leftArrow, modifiers: [])
-
-                Button("Seek +10s") {
-                    NotificationCenter.default.post(name: ViewerNotifications.seekRelative, object: 10.0)
-                }
-                .keyboardShortcut(.rightArrow, modifiers: [])
-
-                Divider()
-
-                Button("Seek 0%") {
-                    NotificationCenter.default.post(name: ViewerNotifications.seekPercent, object: 0.0)
-                }
-                .keyboardShortcut("0", modifiers: [])
-
-                Button("Seek 10%") {
-                    NotificationCenter.default.post(name: ViewerNotifications.seekPercent, object: 0.1)
-                }
-                .keyboardShortcut("1", modifiers: [])
-
-                Button("Seek 20%") {
-                    NotificationCenter.default.post(name: ViewerNotifications.seekPercent, object: 0.2)
-                }
-                .keyboardShortcut("2", modifiers: [])
-
-                Button("Seek 30%") {
-                    NotificationCenter.default.post(name: ViewerNotifications.seekPercent, object: 0.3)
-                }
-                .keyboardShortcut("3", modifiers: [])
-
-                Button("Seek 40%") {
-                    NotificationCenter.default.post(name: ViewerNotifications.seekPercent, object: 0.4)
-                }
-                .keyboardShortcut("4", modifiers: [])
-
-                Button("Seek 50%") {
-                    NotificationCenter.default.post(name: ViewerNotifications.seekPercent, object: 0.5)
-                }
-                .keyboardShortcut("5", modifiers: [])
-
-                Button("Seek 60%") {
-                    NotificationCenter.default.post(name: ViewerNotifications.seekPercent, object: 0.6)
-                }
-                .keyboardShortcut("6", modifiers: [])
-
-                Button("Seek 70%") {
-                    NotificationCenter.default.post(name: ViewerNotifications.seekPercent, object: 0.7)
-                }
-                .keyboardShortcut("7", modifiers: [])
-
-                Button("Seek 80%") {
-                    NotificationCenter.default.post(name: ViewerNotifications.seekPercent, object: 0.8)
-                }
-                .keyboardShortcut("8", modifiers: [])
-
-                Button("Seek 90%") {
-                    NotificationCenter.default.post(name: ViewerNotifications.seekPercent, object: 0.9)
-                }
-                .keyboardShortcut("9", modifiers: [])
-            }
-
-            CommandMenu("Maintenance") {
-                Button("Clean Stale Config Entries...") {
-                    appState.showStaleConfigCleanupPreview()
-                }
-                .disabled(!appState.isReady || appState.config == nil)
-            }
+            AppCommands(
+                appState: appState,
+                navigation: navigation,
+                viewer: viewer,
+                mappings: mappings,
+                toasts: toasts
+            )
         }
+
+        Settings {
+            SettingsView()
+                .environment(appState)
+        }
+    }
+
+    /// Applied app-wide so sheets, alerts, menus and the hover panel all agree.
+    private func applyAppearance() {
+        NSApp.appearance = appearance.nsAppearance
     }
 }

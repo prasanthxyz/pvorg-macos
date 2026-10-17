@@ -1,128 +1,225 @@
-import AppKit
 import SwiftUI
 
 struct ViewerView: View {
     @Environment(AppState.self) private var appState
-
-    @State private var showTGP = true
-    @State private var playerState = VideoPlayerState()
+    @Environment(AppNavigation.self) private var navigation
+    @Environment(ViewerModel.self) private var viewer
 
     var body: some View {
         Group {
             if let combination = appState.currentCombination {
-                VStack(spacing: 0) {
-                    header(combination: combination)
-                    Divider().overlay(Color.border)
+                stage(for: combination)
+            } else {
+                emptyState
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.stage)
+            }
+        }
+        // The stage is always dark, so everything on it renders with dark-appearance colors.
+        .environment(\.colorScheme, .dark)
+        .navigationTitle(title)
+        .navigationSubtitle(subtitle)
+        .toolbar { toolbarContent }
+        .onChange(of: appState.currentCombination?.id) { _, _ in
+            viewer.reset()
+            prefetchNext()
+        }
+        .onAppear(perform: prefetchNext)
+        .onDisappear {
+            viewer.reset()
+        }
+    }
 
-                    GeometryReader { geo in
-                        HStack(spacing: 0) {
-                            ZStack {
-                                if showTGP {
-                                    if let tgpURL = appState.tgpURL(for: combination.video.filename),
-                                       let image = NSImage(contentsOf: tgpURL) {
-                                        Image(nsImage: image)
-                                            .resizable()
-                                            .aspectRatio(contentMode: .fit)
-                                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                    } else {
-                                        Text("TGP not found")
-                                            .foregroundStyle(.secondary)
-                                    }
-                                } else {
-                                    VideoPlayerView(playerState: playerState)
-                                }
-                            }
-                            .frame(width: geo.size.width * 0.75, height: geo.size.height)
+    // MARK: Stage
 
-                            Divider().overlay(Color.border)
-
-                            GallerySlideshowView(images: combination.gallery.imageFiles)
-                                .frame(width: geo.size.width * 0.25, height: geo.size.height)
+    private func stage(for combination: Combination) -> some View {
+        GeometryReader { geo in
+            HStack(spacing: 0) {
+                ZStack {
+                    switch viewer.mode {
+                    case .contactSheet:
+                        contactSheet(for: combination)
+                    case .video:
+                        VideoPlayerView(playerState: viewer.player) {
+                            viewer.show(.contactSheet, for: combination)
                         }
                     }
                 }
-                .onChange(of: appState.combinationIndex) { _, _ in
-                    playerState.stopAndClear()
-                    showTGP = true
-                }
-                .onReceive(NotificationCenter.default.publisher(for: ViewerNotifications.toggleMode)) { _ in
-                    toggleMode()
-                }
-                .onReceive(NotificationCenter.default.publisher(for: ViewerNotifications.previous)) { _ in
-                    appState.previousCombination()
-                }
-                .onReceive(NotificationCenter.default.publisher(for: ViewerNotifications.next)) { _ in
-                    appState.nextCombination()
-                }
-                .onReceive(NotificationCenter.default.publisher(for: ViewerNotifications.playPause)) { _ in
-                    guard !showTGP else { return }
-                    playerState.togglePlayPause()
-                }
-                .onReceive(NotificationCenter.default.publisher(for: ViewerNotifications.seekRelative)) { note in
-                    guard !showTGP else { return }
-                    guard let delta = note.object as? Double else { return }
-                    playerState.seekRelative(delta)
-                }
-                .onReceive(NotificationCenter.default.publisher(for: ViewerNotifications.seekPercent)) { note in
-                    guard !showTGP else { return }
-                    guard let pct = note.object as? Double else { return }
-                    playerState.seekToPercent(pct)
-                }
-            } else {
-                Text("No combinations found.")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                Rectangle()
+                    .fill(Color.stageHairline)
+                    .frame(width: 1)
+
+                GallerySlideshowView(gallery: combination.gallery)
+                    .frame(width: (geo.size.width * 0.25).rounded())
             }
         }
-        .background(Color.bgPrimary)
+        .background(Color.stage)
     }
 
     @ViewBuilder
-    private func header(combination: Combination) -> some View {
-        HStack(spacing: 10) {
-            Text(combination.video.filename)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            Button(showTGP ? "VID" : "TGP") {
-                toggleMode()
-            }
-            .buttonStyle(.borderedProminent)
-
-            Button("Prev") {
-                appState.previousCombination()
-            }
-            .buttonStyle(.bordered)
-
-            Button("Next") {
-                appState.nextCombination()
-            }
-            .buttonStyle(.bordered)
-
-            Text(combination.gallery.name)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-
-            Text("\(appState.combinationIndex + 1)/\(max(appState.combinations.count, 1))")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.bgSecondary)
-    }
-
-    private func toggleMode() {
-        guard let combination = appState.currentCombination else { return }
-
-        if showTGP {
-            showTGP = false
-            playerState.load(url: combination.video.fileURL)
-            playerState.play()
+    private func contactSheet(for combination: Combination) -> some View {
+        let url = appState.tgpURL(for: combination.video.filename)
+        if let url, FileManager.default.fileExists(atPath: url.path) {
+            AsyncThumbnail(url: url, maxPixelSize: ImageSize.full, contentMode: .fit, placeholder: .clear)
+                .id(url)
+                .padding(Spacing.lg)
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) {
+                    viewer.show(.video, for: combination)
+                }
+                .accessibilityLabel("Contact sheet for \(DisplayName.title(for: combination.video))")
+                .accessibilityHint("Double-click to play the video")
         } else {
-            showTGP = true
-            playerState.pause()
+            ContentUnavailableView {
+                Label("No Contact Sheet", systemImage: "square.grid.3x3")
+            } description: {
+                Text("A preview couldn’t be generated for this video. Reloading the library tries again.")
+            } actions: {
+                Button("Play Video") {
+                    viewer.show(.video, for: combination)
+                }
+                .buttonStyle(.borderedProminent)
+            }
         }
     }
+
+    // MARK: Toolbar
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem {
+            Picker("Display", selection: modeBinding) {
+                Label("Contact Sheet", systemImage: "square.grid.3x3")
+                    .tag(ViewerModel.Mode.contactSheet)
+                Label("Video", systemImage: "play.rectangle")
+                    .tag(ViewerModel.Mode.video)
+            }
+            .pickerStyle(.segmented)
+            .labelStyle(.iconOnly)
+            .help("Switch between the contact sheet and the video (P)")
+            .disabled(appState.currentCombination == nil)
+        }
+
+        ToolbarItem {
+            ControlGroup {
+                Button {
+                    appState.previousCombination()
+                } label: {
+                    Label("Previous", systemImage: "chevron.left")
+                }
+                .help("Previous combination (B)")
+
+                Button {
+                    appState.nextCombination()
+                } label: {
+                    Label("Next", systemImage: "chevron.right")
+                }
+                .help("Next combination (N)")
+            } label: {
+                Label("Navigate", systemImage: "chevron.left.chevron.right")
+            }
+            .disabled(appState.combinations.count < 2)
+        }
+
+        ToolbarItem {
+            Text(positionText)
+                .opacity(appState.combinations.isEmpty ? 0 : 1)
+                .font(.callout.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .contentTransition(.numericText())
+                .padding(.horizontal, Spacing.xs)
+                .accessibilityLabel(positionAccessibilityText)
+        }
+    }
+
+    private var modeBinding: Binding<ViewerModel.Mode> {
+        Binding(
+            get: { viewer.mode },
+            set: { viewer.show($0, for: appState.currentCombination) }
+        )
+    }
+
+    // MARK: Text
+
+    private var title: String {
+        guard let combination = appState.currentCombination else { return "Viewer" }
+        return DisplayName.title(for: combination.video)
+    }
+
+    private var subtitle: String {
+        guard let combination = appState.currentCombination else { return "" }
+        return DisplayName.credits(studio: combination.video.studio, actors: combination.video.actors)
+    }
+
+    private var positionText: String {
+        guard !appState.combinations.isEmpty else { return "0 of 0" }
+        return "\((appState.combinationIndex + 1).formatted()) of \(appState.combinations.count.formatted())"
+    }
+
+    private var positionAccessibilityText: String {
+        "Combination \(positionText)"
+    }
+
+    // MARK: Empty states
+
+    @ViewBuilder
+    private var emptyState: some View {
+        if appState.videos.isEmpty {
+            ContentUnavailableView {
+                Label("No Videos", systemImage: "film.stack")
+            } description: {
+                Text("pvorg didn’t find any videos in \(abbreviated(appState.config?.videosPath)).")
+            } actions: {
+                Button("Reload Library") { reloadLibrary(appState) }
+            }
+        } else if appState.galleries.isEmpty {
+            ContentUnavailableView {
+                Label("No Galleries", systemImage: "photo.on.rectangle.angled")
+            } description: {
+                Text("Add folders of images to \(abbreviated(appState.config?.galleriesPath)), then reload the library.")
+            } actions: {
+                Button("Reload Library") { reloadLibrary(appState) }
+            }
+        } else if !appState.filtersAreDefault {
+            ContentUnavailableView {
+                Label("No Matching Combinations", systemImage: "line.3.horizontal.decrease.circle")
+            } description: {
+                Text(appState.selectedTags.isEmpty
+                    ? "Your filters exclude every video and gallery pairing."
+                    : "Your filters exclude every video and gallery pairing. Required tags only match videos marked Yes for them in Tag Mapping.")
+            } actions: {
+                Button("Edit Filters") { navigation.page = .filters }
+                    .buttonStyle(.borderedProminent)
+                Button("Reset Filters") { appState.resetFilters() }
+            }
+        } else {
+            ContentUnavailableView {
+                Label("No Combinations", systemImage: "rectangle.on.rectangle.slash")
+            } description: {
+                Text("Every video is excluded from every gallery. Include some galleries in Gallery Mapping.")
+            } actions: {
+                Button("Open Gallery Mapping") { navigation.page = .galleryMapping }
+            }
+        }
+    }
+
+    private func abbreviated(_ path: String?) -> String {
+        guard let path else { return "the videos folder" }
+        return (path as NSString).abbreviatingWithTildeInPath
+    }
+
+    private func prefetchNext() {
+        guard appState.combinations.count > 1 else { return }
+        let next = appState.combinations[(appState.combinationIndex + 1) % appState.combinations.count]
+        ImagePipeline.shared.prefetch(appState.tgpURL(for: next.video.filename), maxPixelSize: ImageSize.full)
+    }
+}
+
+/// Re-runs the startup pipeline after clearing decoded images, since previews may be regenerated.
+@MainActor
+func reloadLibrary(_ appState: AppState) {
+    ImagePipeline.shared.removeAll()
+    appState.reload()
 }

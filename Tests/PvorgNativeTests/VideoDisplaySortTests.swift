@@ -22,25 +22,23 @@ final class VideoDisplaySortTests: XCTestCase {
         ])
     }
 
-    func testGalleryMappingPageSortsByDisplayedNameBeforePagination() {
-        let appState = AppState()
-        appState.config = AppConfig(
-            videosPath: "/tmp/videos",
-            galleriesPath: "/tmp/galleries",
-            tags: ["tag-a"],
-            videoRelations: [:]
-        )
-        appState.galleries = [Gallery(name: "Gallery A", imageFiles: [])]
-        appState.videos = [
-            makeVideo(filename: "charlie-actor-title.mp4", title: ""),
-            makeVideo(filename: "zeta-actor-title.mp4", title: "Bravo"),
-            makeVideo(filename: "delta-actor-title.mp4", title: "alpha"),
-            makeVideo(filename: "beta-actor-title.mp4", title: "Alpha"),
+    func testSortMatchesHumanizedDisplayNames() {
+        let videos = [
+            makeVideo(filename: "a-x-zebra.mp4", title: "zebra"),
+            makeVideo(filename: "b-x-a_long_road.mp4", title: "a_long_road"),
+            makeVideo(filename: "c-x-another.mp4", title: "another"),
         ]
 
-        let page = appState.galleryMappingPage(page: 1, pageSize: 10, hideDecided: false)
+        XCTAssertEqual(VideoDisplaySort.sorted(videos).map(\.title), ["a_long_road", "another", "zebra"])
+        XCTAssertEqual(VideoDisplaySort.sorted(videos).map { VideoDisplaySort.displayName(for: $0) }, ["A Long Road", "Another", "Zebra"])
+    }
 
-        XCTAssertEqual(page.videos.map(\.filename), [
+    func testGalleryMappingRowsSortByDisplayedName() {
+        let appState = makeAppState()
+
+        let rows = appState.mappingRows(.galleries, hideDecided: false)
+
+        XCTAssertEqual(rows.map(\.filename), [
             "beta-actor-title.mp4",
             "delta-actor-title.mp4",
             "zeta-actor-title.mp4",
@@ -48,7 +46,20 @@ final class VideoDisplaySortTests: XCTestCase {
         ])
     }
 
-    func testTagMappingPageSortsByDisplayedNameBeforePagination() {
+    func testTagMappingRowsSortByDisplayedName() {
+        let appState = makeAppState()
+
+        let rows = appState.mappingRows(.tags, hideDecided: false)
+
+        XCTAssertEqual(rows.map(\.filename), [
+            "beta-actor-title.mp4",
+            "delta-actor-title.mp4",
+            "zeta-actor-title.mp4",
+            "charlie-actor-title.mp4",
+        ])
+    }
+
+    private func makeAppState() -> AppState {
         let appState = AppState()
         appState.config = AppConfig(
             videosPath: "/tmp/videos",
@@ -63,15 +74,7 @@ final class VideoDisplaySortTests: XCTestCase {
             makeVideo(filename: "delta-actor-title.mp4", title: "alpha"),
             makeVideo(filename: "beta-actor-title.mp4", title: "Alpha"),
         ]
-
-        let page = appState.tagMappingPage(page: 1, pageSize: 10, hideDecided: false)
-
-        XCTAssertEqual(page.videos.map(\.filename), [
-            "beta-actor-title.mp4",
-            "delta-actor-title.mp4",
-            "zeta-actor-title.mp4",
-            "charlie-actor-title.mp4",
-        ])
+        return appState
     }
 
     private func makeVideo(filename: String, title: String) -> Video {

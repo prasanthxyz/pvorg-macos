@@ -6,9 +6,9 @@ protocol VideoDisplaySortable {
 }
 
 enum VideoDisplaySort {
+    /// The name shown in the UI. Sorting uses the same string so lists read alphabetically.
     static func displayName<T: VideoDisplaySortable>(for item: T) -> String {
-        let trimmedTitle = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmedTitle.isEmpty ? item.filename : trimmedTitle
+        DisplayName.title(for: item)
     }
 
     static func sorted<T: VideoDisplaySortable>(_ items: [T]) -> [T] {
