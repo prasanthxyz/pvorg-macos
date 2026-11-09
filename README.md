@@ -1,4 +1,4 @@
-# pvorg-native
+# pvorg-macos
 
 The macOS app of PP Video Organizer, built with SwiftUI and Swift Concurrency.
 
