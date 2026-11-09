@@ -121,15 +121,7 @@ struct CommandContext {
             galleryName: combination.gallery.name,
             videoTitle: DisplayName.title(for: combination.video)
         )
-        guard exclude(pairing) else { return }
-        toasts.show(
-            "Excluded “\(pairing.galleryName)” from “\(pairing.videoTitle)”",
-            systemImage: "hand.thumbsdown.fill",
-            actionTitle: "Undo"
-        ) { [undoManager] in
-            guard undoManager?.undoActionName == Self.undoActionName else { return }
-            undoManager?.undo()
-        }
+        exclude(pairing)
     }
 
     static let undoActionName = "Exclude Pairing"
@@ -144,6 +136,14 @@ struct CommandContext {
                 MainActor.assumeIsolated { self.restore(exclusion, pairing) }
             }
             undoManager?.setActionName(Self.undoActionName)
+            toasts.show(
+                "Excluded “\(pairing.galleryName)” from “\(pairing.videoTitle)”",
+                systemImage: "hand.thumbsdown.fill",
+                actionTitle: "Undo"
+            ) { [undoManager] in
+                guard undoManager?.undoActionName == Self.undoActionName else { return }
+                undoManager?.undo()
+            }
             return true
         } catch {
             appState.appNotice = AppNotice(title: "Couldn’t Exclude Pairing", message: error.localizedDescription)
@@ -154,6 +154,8 @@ struct CommandContext {
     private func restore(_ exclusion: PairingExclusion, _ pairing: Pairing) {
         do {
             try appState.restorePairing(exclusion)
+            // Replaces the Exclude toast, so its Undo can't linger after undoing another way.
+            toasts.show("Restored “\(pairing.galleryName)” for “\(pairing.videoTitle)”", systemImage: "arrow.uturn.backward")
             undoManager?.registerUndo(withTarget: appState) { _ in
                 MainActor.assumeIsolated { _ = self.exclude(pairing) }
             }
