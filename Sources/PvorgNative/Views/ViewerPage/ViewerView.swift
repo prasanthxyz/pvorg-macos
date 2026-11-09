@@ -209,7 +209,7 @@ struct ViewerView: View {
             ContentUnavailableView {
                 Label("No Videos", systemImage: "film.stack")
             } description: {
-                Text("pvorg didn’t find any videos in \(abbreviated(appState.config?.videosPath)).")
+                Text("PP Video Organizer didn’t find any videos in \(abbreviated(appState.config?.videosPath)).")
             } actions: {
                 Button("Reload Library") { reloadLibrary(appState) }
             }

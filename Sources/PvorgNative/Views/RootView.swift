@@ -60,9 +60,19 @@ struct RootView: View {
 
 private struct MainSplitView: View {
     @Environment(AppNavigation.self) private var navigation
+    /// The sidebar's hidden state, remembered across launches (SPEC §4.1). The
+    /// toolbar button and View › Hide Sidebar (⌃⌘S) come from the system.
+    @AppStorage("sidebarHidden") private var sidebarHidden = false
+
+    private var columnVisibility: Binding<NavigationSplitViewVisibility> {
+        Binding(
+            get: { sidebarHidden ? .detailOnly : .all },
+            set: { sidebarHidden = $0 == .detailOnly }
+        )
+    }
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: columnVisibility) {
             Sidebar()
         } detail: {
             switch navigation.page {
@@ -120,7 +130,7 @@ struct StartupProgressView: View {
         }
         .padding(Spacing.xxl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .navigationTitle("pvorg")
+        .navigationTitle("PP Video Organizer")
         .accessibilityElement(children: .combine)
     }
 }
@@ -135,7 +145,7 @@ struct StartupErrorView: View {
         } description: {
             VStack(spacing: Spacing.md) {
                 Text(message)
-                Text("pvorg reads its configuration from \(configPath).")
+                Text("PP Video Organizer reads its configuration from \(configPath).")
                     .font(.callout)
                     .foregroundStyle(.tertiary)
                     .textSelection(.enabled)
@@ -155,7 +165,7 @@ struct StartupErrorView: View {
         }
         .frame(maxWidth: 560)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .navigationTitle("pvorg")
+        .navigationTitle("PP Video Organizer")
     }
 
     private var configPath: String {

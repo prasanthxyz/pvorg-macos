@@ -2,7 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_NAME="${APP_NAME:-pvorg}"
+APP_NAME="${APP_NAME:-PP Video Organizer}"
+EXEC_NAME="${EXEC_NAME:-pvorg}"
 PRODUCT_NAME="${PRODUCT_NAME:-pvorg-native}"
 BUNDLE_ID="${BUNDLE_ID:-com.pvorg.native}"
 VERSION="${VERSION:-1.0.0}"
@@ -46,8 +47,8 @@ fi
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 
-cp "$BIN_EXEC" "$APP_DIR/Contents/MacOS/$APP_NAME"
-chmod +x "$APP_DIR/Contents/MacOS/$APP_NAME"
+cp "$BIN_EXEC" "$APP_DIR/Contents/MacOS/$EXEC_NAME"
+chmod +x "$APP_DIR/Contents/MacOS/$EXEC_NAME"
 
 echo "Compiling assets..."
 if xcrun actool "$ROOT_DIR/Sources/PvorgNative/Resources/Assets.xcassets" \
@@ -71,7 +72,7 @@ cat >"$APP_DIR/Contents/Info.plist" <<EOF
   <key>CFBundleDisplayName</key>
   <string>${APP_NAME}</string>
   <key>CFBundleExecutable</key>
-  <string>${APP_NAME}</string>
+  <string>${EXEC_NAME}</string>
   <key>CFBundleIdentifier</key>
   <string>${BUNDLE_ID}</string>
   <key>CFBundleInfoDictionaryVersion</key>

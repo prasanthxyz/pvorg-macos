@@ -1,11 +1,11 @@
 # pvorg-native
 
-The macOS app of pvorg (Personal Video + Gallery Organizer), built with SwiftUI
-and Swift Concurrency.
+The macOS app of PP Video Organizer, built with SwiftUI and Swift Concurrency.
 
 **What the app does and how it should look and behave is defined in
-[docs/SPEC.md](docs/SPEC.md)**, the product spec shared with pvorg-web and
-pvorg-android. This README covers building, running and developer tooling only.
+[docs/SPEC.md](docs/SPEC.md)**, the product spec shared with pvorg-web,
+pvorg-android and pvorg-electron. This README covers building, running and
+developer tooling only.
 
 ## Requirements
 
@@ -33,8 +33,8 @@ You can also open `Package.swift` in Xcode and run the `pvorg-native` target.
 ### App bundle
 
 ```bash
-./Scripts/build_app_bundle.sh    # produces dist/pvorg.app
-open dist/pvorg.app
+./Scripts/build_app_bundle.sh    # produces "dist/PP Video Organizer.app"
+open "dist/PP Video Organizer.app"
 ```
 
 `CONFIGURATION=debug` builds a debug bundle, and `DIST_DIR=<dir>` chooses where
@@ -62,7 +62,7 @@ then reported as SKIP.
 Scripts/make_ui_fixture.sh /tmp/pvorg-fixture
 CONFIGURATION=debug DIST_DIR=/tmp/pvorg-debug ./Scripts/build_app_bundle.sh
 open -W --env PVORG_CONFIG=/tmp/pvorg-fixture/pvorg.json \
-        --env PVORG_UI_TOUR=/tmp/pvorg-tour /tmp/pvorg-debug/pvorg.app
+        --env PVORG_UI_TOUR=/tmp/pvorg-tour "/tmp/pvorg-debug/PP Video Organizer.app"
 cat /tmp/pvorg-tour/results.txt
 ```
 
