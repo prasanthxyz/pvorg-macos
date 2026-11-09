@@ -36,18 +36,27 @@ enum VideoDeleter {
                 continue
             }
 
-            let targets = [
-                videosPath.appendingPathComponent(filename),
-                videosPath.appendingPathComponent("img", isDirectory: true).appendingPathComponent("\(filename).jpg"),
-            ]
+            let videoURL = videosPath.appendingPathComponent(filename)
+            let contactSheetURL = videosPath.appendingPathComponent("img", isDirectory: true).appendingPathComponent("\(filename).jpg")
 
             var deletedSomething = false
-            for target in targets where fm.fileExists(atPath: target.path) {
+            if fm.fileExists(atPath: videoURL.path) {
                 do {
-                    try fm.removeItem(at: target)
+                    try fm.removeItem(at: videoURL)
                     deletedSomething = true
                 } catch {
-                    errors.append("Failed deleting \(target.path): \(error.localizedDescription)")
+                    // The file is still there, so keep its decisions and metadata.
+                    errors.append("Failed deleting \(videoURL.path): \(error.localizedDescription)")
+                    continue
+                }
+            }
+            // A missing contact sheet is fine; one that can't be removed is reported
+            // and cleaned up as an orphan at the next startup.
+            if fm.fileExists(atPath: contactSheetURL.path) {
+                do {
+                    try fm.removeItem(at: contactSheetURL)
+                } catch {
+                    errors.append("Failed deleting \(contactSheetURL.path): \(error.localizedDescription)")
                 }
             }
 
