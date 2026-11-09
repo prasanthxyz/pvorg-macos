@@ -1,73 +1,81 @@
 # pvorg-native
 
-Native macOS implementation of PVORG (SwiftUI + Swift Concurrency), originally based on `SPECIFICATION-NATIVE.md`.
+The macOS app of pvorg (Personal Video + Gallery Organizer), built with SwiftUI
+and Swift Concurrency.
 
-- [docs/FUNCTIONALITY.md](docs/FUNCTIONALITY.md): what the app does, screen by screen, including data semantics, states, menus and shortcuts.
-- [docs/DESIGN.md](docs/DESIGN.md): design direction, design system, and the reasoning behind each UX decision.
-
-Where these docs and the original specification differ on the interface, the docs describe the current app.
+**What the app does and how it should look and behave is defined in
+[docs/SPEC.md](docs/SPEC.md)**, the product spec shared with pvorg-web and
+pvorg-android. This README covers building, running and developer tooling only.
 
 ## Requirements
 
 - macOS 14+
-- Xcode installed
-- `ffmpeg` and `ffprobe` in `PATH` (for preprocessing)
-- `~/pvorg.json` config file present
+- Xcode
+- `ffmpeg` and `ffprobe` in `PATH` (for preview generation)
+- A library configuration at `~/pvorg.json` (see the spec, §1), or another
+  file named by the `PVORG_CONFIG` environment variable
 
-## Build
+## Build and run
 
 ```bash
-swift build --package-path .
+swift build
+swift run pvorg-native
 ```
 
-If your active command-line toolchain and SDK mismatch, use the Xcode toolchain explicitly:
+If the active command-line toolchain and SDK don't match, use Xcode's:
 
 ```bash
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build --package-path .
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build
 ```
 
-## Build App Bundle (`pvorg.app`)
+You can also open `Package.swift` in Xcode and run the `pvorg-native` target.
+
+### App bundle
 
 ```bash
-./Scripts/build_app_bundle.sh
-```
-
-This produces:
-
-- `dist/pvorg.app`
-
-Then launch:
-
-```bash
+./Scripts/build_app_bundle.sh    # produces dist/pvorg.app
 open dist/pvorg.app
 ```
 
-## Run
+`CONFIGURATION=debug` builds a debug bundle, and `DIST_DIR=<dir>` chooses where
+it goes.
+
+## Tests
 
 ```bash
-swift run --package-path . pvorg-native
+swift test
 ```
 
-Or open `Package.swift` in Xcode and run the `pvorg-native` target.
+## Visual QA
 
-## Project Layout
+| Tool | Purpose |
+|---|---|
+| `Scripts/make_ui_fixture.sh <dir>` | Builds a synthetic library with ffmpeg: 21 valid videos (one with a very long title), one .mkv (exercises the playback-error state), two badly named files, eight galleries plus an empty one, and stale config entries. |
+| `PVORG_CONFIG=<file>` | Runs the app against another configuration file. |
+| `PVORG_UI_TOUR=<dir>` (debug builds only) | Walks every screen and state, saves PNG screenshots of the app's own windows, presses real keys through the event queue to check every shortcut, writes `results.txt` (PASS/FAIL per check), and quits. `PVORG_UI_TOUR_APPEARANCES=dark,light` chooses the appearances. |
 
-- `Sources/PvorgNative/App`: app entry, pages, menu commands
+Screenshots need no Screen Recording permission. Shortcut checks need the app
+to be frontmost, which macOS won't allow while the screen is locked; they are
+then reported as SKIP.
+
+```bash
+Scripts/make_ui_fixture.sh /tmp/pvorg-fixture
+CONFIGURATION=debug DIST_DIR=/tmp/pvorg-debug ./Scripts/build_app_bundle.sh
+open -W --env PVORG_CONFIG=/tmp/pvorg-fixture/pvorg.json \
+        --env PVORG_UI_TOUR=/tmp/pvorg-tour /tmp/pvorg-debug/pvorg.app
+cat /tmp/pvorg-tour/results.txt
+```
+
+## Project layout
+
+- `Sources/PvorgNative/App`: app entry, pages, menu commands, single-key commands
 - `Sources/PvorgNative/State`: app state and startup pipeline, plus UI models (viewer, library, mapping sessions, keyboard)
 - `Sources/PvorgNative/Services`: scanning, preprocessing, deletion, cleanup
 - `Sources/PvorgNative/DesignSystem`: tokens, image pipeline, shared components
 - `Sources/PvorgNative/Views`: Viewer, Filters, Library, Gallery/Tag Mapping, Settings, shared sheets
-- `Sources/PvorgNative/Models`: config/domain/cache models
-- `Sources/PvorgNative/Debug`: debug-only UI tour for visual QA
-- `Scripts`: standalone CLI helper scripts and the QA fixture generator
-
-## Visual QA
-
-`Scripts/make_ui_fixture.sh` builds a synthetic library. A debug build launched with `PVORG_UI_TOUR=<dir>` walks every screen and state and saves screenshots there. See [docs/FUNCTIONALITY.md §6](docs/FUNCTIONALITY.md#6-developer-tooling).
-
-## Notes
-
-- Startup pipeline includes config load, scan, normalization, cleanup, preprocessing, and report logging.
-- Gallery/tag mapper saves preserve existing relation fields and keep unknown/manual values intact.
-- Config path is `~/pvorg.json` (override with the `PVORG_CONFIG` environment variable).
-- `ffmpeg` and `ffprobe` are expected to be available in `PATH`.
+- `Sources/PvorgNative/Models`: configuration, domain and cache models
+- `Sources/PvorgNative/Debug`: the debug-only UI tour
+- `Scripts`: standalone Python maintenance scripts (filename validation, orphan
+  and config cleanup, contact sheet and sprite generation, re-encoding), the app
+  bundle builder and the QA fixture generator
+- `docs/SPEC.md`: the shared product spec
