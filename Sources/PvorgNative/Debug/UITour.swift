@@ -132,6 +132,14 @@ private final class Tour {
         keyboard.mainWindow?.undoManager?.undo()
         await wait(0.6)
 
+        commands.toggleCurrentPairingInclusion()
+        await shot("\(p)-viewer-included-toast", settle: 1.2)
+        toasts.dismiss()
+        await shot("\(p)-viewer-included", settle: 0.6)
+        keyboard.mainWindow?.undoManager?.undo()
+        toasts.dismiss()
+        await wait(0.6)
+
         appState.selectedStudios = []
         appState.regenerateCombinations()
         await shot("\(p)-viewer-no-matches")
@@ -345,6 +353,40 @@ private final class Tour {
             toasts.dismiss()
         }
 
+        // Include Pairing: I writes "Yes" and keeps the pairing on screen; I again
+        // marks it undecided; ⌘Z undoes each step.
+        appState.showCombination(at: 0)
+        await wait(0.5)
+        if let target = appState.currentCombination {
+            let count = appState.combinations.count
+            let before = appState.config?.videoRelations[target.video.filename]
+            let onDisk = { (try? ConfigService.loadConfig())?.videoRelations[target.video.filename]?.yesGalleries.contains(target.gallery.name) == true }
+            let menuTitle = "Include “\(target.gallery.name)” for This Video"
+
+            check(menuItem("Viewer", menuTitle)?.state == .off && menuItem("Viewer", menuTitle)?.keyEquivalent == "i", "Viewer › Include Pairing is unchecked and shows I")
+            post("i")
+            await wait(0.6)
+            check(commands.isCurrentPairingIncluded && onDisk(), "I writes the gallery to galleries in pvorg.json")
+            check(appState.combinations.count == count && appState.currentCombination?.id == target.id, "Including keeps the pairing on screen")
+            check(toasts.current?.actionTitle == "Undo", "Including shows a toast with Undo")
+            check(menuItem("Viewer", menuTitle)?.state == .on, "Viewer › Include Pairing is checked once included")
+
+            post("i")
+            await wait(0.6)
+            check(!commands.isCurrentPairingIncluded && !onDisk(), "I again marks the pairing undecided")
+
+            post("z", keyCode: 6, modifiers: .command)
+            await wait(0.6)
+            check(commands.isCurrentPairingIncluded && onDisk(), "⌘Z includes it again")
+            post("z", keyCode: 6, modifiers: .command)
+            await wait(0.6)
+            let now = appState.config?.videoRelations[target.video.filename]
+            let unchanged = (now == nil) == (before == nil) && now?.galleries == before?.galleries
+                && now?.excludedGalleries == before?.excludedGalleries && now?.tags == before?.tags && now?.excludedTags == before?.excludedTags
+            check(!onDisk() && unchanged, "⌘Z again leaves pvorg.json as it was")
+            toasts.dismiss()
+        }
+
         // Mapping save is reachable from the File menu.
         navigation.page = .galleryMapping
         await wait(0.8)
@@ -401,7 +443,7 @@ private final class Tour {
     /// Posts a key press through the app's event queue, so it takes the real path.
     private func post(_ characters: String, keyCode: UInt16? = nil, modifiers: NSEvent.ModifierFlags = []) {
         guard let window = mainWindow else { return }
-        let codes: [String: UInt16] = ["a": 0, "b": 11, "c": 8, "n": 45, "p": 35, "v": 9, " ": 49, "2": 19, "5": 23]
+        let codes: [String: UInt16] = ["a": 0, "b": 11, "c": 8, "i": 34, "n": 45, "p": 35, "v": 9, " ": 49, "2": 19, "5": 23]
         for type in [NSEvent.EventType.keyDown, .keyUp] {
             guard let event = NSEvent.keyEvent(
                 with: type,

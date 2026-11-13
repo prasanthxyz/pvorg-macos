@@ -64,6 +64,7 @@ struct AppCommands: Commands {
             commandButton(viewer.mode == .video ? "Show Contact Sheet" : "Play Video", .toggleMode)
             commandButton("Previous Combination", .previous)
             commandButton("Next Combination", .next)
+            commandToggle(includeTitle, .includePairing, isOn: context.isCurrentPairingIncluded)
             commandButton(excludeTitle, .excludePairing)
 
             Divider()
@@ -87,6 +88,18 @@ struct AppCommands: Commands {
         }
         .keyboardShortcut(command.key, modifiers: [])
         .disabled(!context.isAvailable(command))
+    }
+
+    /// A checkmark item for a plain-key command that switches something on and off.
+    private func commandToggle(_ title: String, _ command: PlainKeyCommand, isOn: Bool) -> some View {
+        Toggle(title, isOn: Binding(get: { isOn }, set: { _ in context.perform(command) }))
+            .keyboardShortcut(command.key, modifiers: [])
+            .disabled(!context.isAvailable(command))
+    }
+
+    private var includeTitle: String {
+        guard let gallery = appState.currentCombination?.gallery.name else { return "Include Pairing" }
+        return "Include “\(gallery)” for This Video"
     }
 
     private var excludeTitle: String {

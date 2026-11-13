@@ -18,9 +18,11 @@ enum PlainKeyCommand: Hashable {
     case skipForward
     case jump(tenths: Int)
     case excludePairing
+    case includePairing
 
     static let all: [PlainKeyCommand] = [
-        .go(.viewer), .go(.filters), .toggleMode, .previous, .next, .playPause, .skipBack, .skipForward, .excludePairing,
+        .go(.viewer), .go(.filters), .toggleMode, .previous, .next, .playPause, .skipBack, .skipForward,
+        .excludePairing, .includePairing,
     ] + (0..<10).map { .jump(tenths: $0) }
 
     private static let byCharacters: [String: PlainKeyCommand] = Dictionary(uniqueKeysWithValues: all.map { ($0.characters, $0) })
@@ -44,6 +46,7 @@ enum PlainKeyCommand: Hashable {
         case .skipForward: .rightArrow
         case .jump(let tenths): KeyEquivalent(Character(String(tenths)))
         case .excludePairing: .delete
+        case .includePairing: "i"
         }
     }
 
@@ -78,7 +81,7 @@ struct CommandContext {
         switch command {
         case .go:
             appState.isReady
-        case .toggleMode, .previous, .next, .excludePairing:
+        case .toggleMode, .previous, .next, .excludePairing, .includePairing:
             isViewerActive
         case .playPause, .skipBack, .skipForward, .jump:
             isViewerActive && viewer.canControlPlayback
@@ -97,6 +100,7 @@ struct CommandContext {
         case .skipForward: viewer.player.seekRelative(10)
         case .jump(let tenths): viewer.player.seekToPercent(Double(tenths) / 10)
         case .excludePairing: excludeCurrentPairing()
+        case .includePairing: toggleCurrentPairingInclusion()
         }
     }
 
@@ -163,5 +167,76 @@ struct CommandContext {
         } catch {
             appState.appNotice = AppNotice(title: "Couldn’t Undo", message: error.localizedDescription)
         }
+    }
+
+    // MARK: Including pairings
+
+    static let includeActionName = "Include Pairing"
+    static let clearIncludeActionName = "Mark Pairing Undecided"
+
+    /// Whether pvorg.json explicitly includes the pairing on screen (👍 filled).
+    var isCurrentPairingIncluded: Bool {
+        guard let combination = appState.currentCombination else { return false }
+        return appState.isPairingIncluded(filename: combination.video.filename, galleryName: combination.gallery.name)
+    }
+
+    /// Marks the current gallery as "Yes" for the current video, or, if it
+    /// already is, clears it back to "Undecided". The pairing stays on screen.
+    /// No confirmation: it's undoable (toast, ⌘Z) and editable in Gallery Mapping.
+    func toggleCurrentPairingInclusion() {
+        guard isViewerActive, let combination = appState.currentCombination else { return }
+        let pairing = Pairing(
+            filename: combination.video.filename,
+            galleryName: combination.gallery.name,
+            videoTitle: DisplayName.title(for: combination.video)
+        )
+        setIncluded(!isCurrentPairingIncluded, pairing)
+    }
+
+    @discardableResult
+    private func setIncluded(_ included: Bool, _ pairing: Pairing) -> Bool {
+        do {
+            let change = try appState.setPairingIncluded(included, filename: pairing.filename, galleryName: pairing.galleryName)
+            // The viewer decision supersedes an unsaved edit of the same cell.
+            mappings.galleries.discardPendingChange(filename: pairing.filename, column: pairing.galleryName)
+            let actionName = included ? Self.includeActionName : Self.clearIncludeActionName
+            undoManager?.registerUndo(withTarget: appState) { _ in
+                MainActor.assumeIsolated { self.revertInclusion(change, pairing, actionName: actionName) }
+            }
+            undoManager?.setActionName(actionName)
+            toasts.show(
+                Self.inclusionMessage(included: included, pairing),
+                systemImage: included ? "hand.thumbsup.fill" : "hand.thumbsup",
+                actionTitle: "Undo"
+            ) { [undoManager] in
+                guard undoManager?.undoActionName == actionName else { return }
+                undoManager?.undo()
+            }
+            return true
+        } catch {
+            appState.appNotice = AppNotice(title: included ? "Couldn’t Include Pairing" : "Couldn’t Change Pairing", message: error.localizedDescription)
+            return false
+        }
+    }
+
+    private func revertInclusion(_ change: PairingInclusion, _ pairing: Pairing, actionName: String) {
+        do {
+            try appState.restorePairingDecision(change)
+            let isIncluded = change.previousState == .yes
+            // Replaces the toast that offered Undo, so it can't linger after undoing another way.
+            toasts.show(Self.inclusionMessage(included: isIncluded, pairing), systemImage: isIncluded ? "hand.thumbsup.fill" : "hand.thumbsup")
+            undoManager?.registerUndo(withTarget: appState) { _ in
+                MainActor.assumeIsolated { _ = self.setIncluded(change.included, pairing) }
+            }
+            undoManager?.setActionName(actionName)
+        } catch {
+            appState.appNotice = AppNotice(title: "Couldn’t Undo", message: error.localizedDescription)
+        }
+    }
+
+    private static func inclusionMessage(included: Bool, _ pairing: Pairing) -> String {
+        included
+            ? "Included “\(pairing.galleryName)” for “\(pairing.videoTitle)”"
+            : "Marked “\(pairing.galleryName)” as undecided for “\(pairing.videoTitle)”"
     }
 }

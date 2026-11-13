@@ -3,9 +3,9 @@ import Observation
 import SwiftUI
 
 /// Dispatches the app's single-key shortcuts (`PlainKeyCommand`: V, C, P, B, N,
-/// Space, arrows, digits) against live state, and keeps them from swallowing
-/// typing: while text is being edited, or while a sheet or Settings has focus,
-/// those keys go straight to the focused control. Either way menus never see
+/// I, Delete, Space, arrows, digits) against live state, and keeps them from
+/// swallowing typing: while text is being edited, or while a sheet or Settings
+/// has focus, those keys go straight to the focused control. Either way menus never see
 /// these keys, so their possibly stale key equivalents can't misfire.
 /// `isEditingText` also lets views withdraw their own shortcuts (⌘A, ⌘⌫).
 @Observable

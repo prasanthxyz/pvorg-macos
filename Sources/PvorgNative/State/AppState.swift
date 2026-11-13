@@ -39,6 +39,19 @@ struct PairingExclusion {
     let index: Int?
 }
 
+/// A viewer pairing marked included (Yes) or cleared back to Undecided, with
+/// what's needed to undo it.
+struct PairingInclusion {
+    let filename: String
+    let galleryName: String
+    /// Whether the pairing was included (Yes) rather than cleared (Undecided).
+    let included: Bool
+    /// The gallery decision before the change (yes or undecided).
+    let previousState: TriState
+    /// Whether the video had a pvorg.json entry before; undo removes one it created.
+    let hadRelation: Bool
+}
+
 @Observable
 @MainActor
 final class AppState {
@@ -288,9 +301,7 @@ final class AppState {
             throw NSError(domain: "AppState", code: 5, userInfo: [NSLocalizedDescriptionKey: "Config not loaded yet."])
         }
         let relation = config.videoRelations[filename]
-        let previousState: TriState = relation?.yesGalleries.contains(galleryName) == true ? .yes
-            : relation?.noGalleries.contains(galleryName) == true ? .no
-            : .undecided
+        let previousState = galleryDecision(filename: filename, galleryName: galleryName)
 
         applyMappingChanges(.galleries, [filename: [galleryName: .no]], to: &config)
         try ConfigService.saveConfig(config)
@@ -318,12 +329,7 @@ final class AppState {
             throw NSError(domain: "AppState", code: 6, userInfo: [NSLocalizedDescriptionKey: "Config not loaded yet."])
         }
         applyMappingChanges(.galleries, [exclusion.filename: [exclusion.galleryName: exclusion.previousState]], to: &config)
-        // Leave pvorg.json exactly as it was if the exclusion created the entry
-        // and nothing else has been decided for the video since.
-        if !exclusion.hadRelation, let relation = config.videoRelations[exclusion.filename],
-           [relation.galleries, relation.excludedGalleries, relation.tags, relation.excludedTags].allSatisfy({ $0?.isEmpty ?? true }) {
-            config.videoRelations.removeValue(forKey: exclusion.filename)
-        }
+        removeEntryIfUnused(exclusion.filename, hadRelation: exclusion.hadRelation, in: &config)
         try ConfigService.saveConfig(config)
         self.config = config
         refreshRelatedGalleries(for: exclusion.filename)
@@ -338,6 +344,69 @@ final class AppState {
             combinationIndex = index
         }
         libraryRevision += 1
+    }
+
+    /// The saved gallery decision for a pairing (Gallery Mapping's cell).
+    func galleryDecision(filename: String, galleryName: String) -> TriState {
+        let relation = config?.videoRelations[filename]
+        if relation?.yesGalleries.contains(galleryName) == true { return .yes }
+        if relation?.noGalleries.contains(galleryName) == true { return .no }
+        return .undecided
+    }
+
+    /// Whether pvorg.json explicitly includes the pairing (Yes for that gallery).
+    func isPairingIncluded(filename: String, galleryName: String) -> Bool {
+        galleryDecision(filename: filename, galleryName: galleryName) == .yes
+    }
+
+    /// Writes "Yes" for the video's gallery to pvorg.json, or clears it back to
+    /// "Undecided", exactly as Gallery Mapping would. Both kinds of pairing are
+    /// shown, so the combinations and the viewer's position don't change. An
+    /// excluded pairing isn't in the viewer, so it can't be included from there.
+    func setPairingIncluded(_ included: Bool, filename: String, galleryName: String) throws -> PairingInclusion {
+        guard var config else {
+            throw NSError(domain: "AppState", code: 7, userInfo: [NSLocalizedDescriptionKey: "Config not loaded yet."])
+        }
+        let previousState = galleryDecision(filename: filename, galleryName: galleryName)
+        guard previousState != .no else {
+            throw NSError(domain: "AppState", code: 8, userInfo: [NSLocalizedDescriptionKey: "“\(galleryName)” is excluded from this video. Change it in Gallery Mapping."])
+        }
+        let change = PairingInclusion(
+            filename: filename,
+            galleryName: galleryName,
+            included: included,
+            previousState: previousState,
+            hadRelation: config.videoRelations[filename] != nil
+        )
+        guard previousState != (included ? .yes : .undecided) else { return change }
+
+        applyMappingChanges(.galleries, [filename: [galleryName: included ? .yes : .undecided]], to: &config)
+        try ConfigService.saveConfig(config)
+        self.config = config
+        libraryRevision += 1
+        return change
+    }
+
+    /// Undoes `setPairingIncluded`, leaving pvorg.json exactly as it was when
+    /// the change created the video's entry and nothing else uses it since.
+    func restorePairingDecision(_ change: PairingInclusion) throws {
+        guard var config else {
+            throw NSError(domain: "AppState", code: 9, userInfo: [NSLocalizedDescriptionKey: "Config not loaded yet."])
+        }
+        applyMappingChanges(.galleries, [change.filename: [change.galleryName: change.previousState]], to: &config)
+        removeEntryIfUnused(change.filename, hadRelation: change.hadRelation, in: &config)
+        try ConfigService.saveConfig(config)
+        self.config = config
+        libraryRevision += 1
+    }
+
+    /// Removes a video's entry that an undone viewer decision created, if
+    /// nothing else has been decided for the video since.
+    private func removeEntryIfUnused(_ filename: String, hadRelation: Bool, in config: inout AppConfig) {
+        if !hadRelation, let relation = config.videoRelations[filename],
+           [relation.galleries, relation.excludedGalleries, relation.tags, relation.excludedTags].allSatisfy({ $0?.isEmpty ?? true }) {
+            config.videoRelations.removeValue(forKey: filename)
+        }
     }
 
     /// Recomputes a video's galleries from config the same way the scanner does.

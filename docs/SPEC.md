@@ -7,7 +7,7 @@
 > in one repository and copy it to the other three in the same change. The
 > version line below identifies the copy.
 >
-> **Version 1.7 · 2026-11-09**
+> **Version 1.8 · 2026-11-14**
 
 **PP Video Organizer** (*pvorg* for short, the name of its library files and
 identifiers, §4.2) is a single-user tool for browsing
@@ -331,6 +331,29 @@ that file into `pvorg.json`:
 - It never moves, copies or deletes files, and it is one atomic write
   followed by a rescan.
 
+### 3.11 Include Pairing (optional)
+
+The viewer's counterpart to Exclude Pairing (§3.6): it records that the
+current gallery belongs with this video.
+
+- **Including** writes Yes for that gallery to the video's relation, exactly
+  as setting the cell to Yes in Gallery Mapping and saving would. Any unsaved
+  Gallery Mapping edit of that cell is discarded.
+- **It's a toggle.** On a pairing that is already Yes, the same action clears
+  it back to Undecided.
+- The combination list doesn't change: Yes and Undecided pairings are both
+  shown, so the pairing stays on screen and the position stays the same. An
+  excluded pairing is never in the viewer, so it can't be included from there.
+- No files are touched, and the video's other decisions stay as they are.
+- **No confirmation, and undoable** exactly like Exclude Pairing: an Undo
+  action in the confirmation message, plus the platform's standard undo and
+  redo. Undo restores the previous decision and, if the change created the
+  video's entry and nothing else uses it since, removes the entry again.
+- **Feedback.** "Included "Gallery" for "Title"" or "Marked "Gallery" as
+  undecided for "Title"", with Undo. Undoing by any route replaces it with
+  the message for the state it returns to, without Undo; redo shows the
+  original message again.
+
 ---
 
 # Part II — Experience
@@ -413,10 +436,11 @@ settings and installs keep working.
 **Header.** Title: the video's humanized title. Subtitle: credits. Actions,
 in order:
 
-1. **Exclude Pairing** (thumbs-down icon);
-2. a **Contact Sheet | Video** mode control showing the current mode;
-3. **Previous** and **Next** combination;
-4. the position, "12 of 188", hidden when there are no combinations.
+1. **Include Pairing** (thumbs-up toggle), where offered (§6.8);
+2. **Exclude Pairing** (thumbs-down icon);
+3. a **Contact Sheet | Video** mode control showing the current mode;
+4. **Previous** and **Next** combination;
+5. the position, "12 of 188", hidden when there are no combinations.
 
 **Stage**, the left 75% on wide layouts:
 
@@ -440,8 +464,9 @@ caption shows the gallery name and "3 of 11".
 **Navigation** wraps at both ends, and the next combination's contact sheet is
 prefetched.
 
-**Context menu** on the stage (right-click or long-press): Exclude
-"Gallery" from This Video, plus platform reveal actions where they exist.
+**Context menu** on the stage (right-click or long-press): Include "Gallery"
+for This Video (where offered, §6.8), Exclude "Gallery" from This Video, plus
+platform reveal actions where they exist.
 
 **States** (each with its explanation and fixing action):
 
@@ -594,6 +619,7 @@ Capabilities an app may offer. Each follows these rules wherever it exists;
 | **Player volume and full screen** | In video mode, ↑ / ↓ change volume by 10%, M mutes, and F toggles full screen (Esc also leaves it). The transport bar shows a volume control and a full-screen button. |
 | **Missing-tool warning** | When `ffmpeg` or `ffprobe` is missing, a warning callout in the Library (and on the startup screen during step 5) names the tool and how to install it. |
 | **Import from pvorg.yml** | **File › Import from pvorg.yml…** (or Settings): choose the file (default `~/pvorg.yml`), review the preview, confirm. Rules in §3.10. |
+| **Include Pairing** | A thumbs-up toggle in the viewer header, just before Exclude Pairing, showing whether `pvorg.json` explicitly includes the pairing: outlined while it's Undecided, filled and selected once it's Yes. Also a checkmark item in the stage's context menu and the Viewer menu, and the I key. Rules in §3.11. |
 
 ---
 
@@ -608,6 +634,7 @@ Capabilities an app may offer. Each follows these rules wherever it exists;
 | Toggle contact sheet / video | Viewer | P | mode control, double-tap; P |
 | Previous / Next combination | Viewer | B / N | header buttons, horizontal swipe on the stage; B / N |
 | Exclude Pairing | Viewer | ⌫ (Backspace/Delete) | header button, stage menu; ⌫ |
+| Include Pairing (optional, §6.8) | Viewer | I | — |
 | Play / Pause | Viewer, video mode | Space | tap the video; Space |
 | Skip back / forward 10 s | Viewer, video mode | ← / → | transport buttons; ← / → |
 | Jump to 0%…90% | Viewer, video mode | 0…9 | 0…9 |
@@ -642,7 +669,7 @@ Rules:
 - **Errors** use an alert or dialog, because they need acknowledgement.
 - **Permanent actions** (deleting videos, removing stale entries) always
   confirm, and Cancel is the default action.
-- **Reversible actions** (Exclude Pairing, mapping edits before saving) never
+- **Reversible actions** (Exclude and Include Pairing, mapping edits before saving) never
   confirm; they offer Undo or Revert instead. Revert discards work, so it
   confirms.
 
@@ -811,6 +838,7 @@ decision changes.
 | The app is called PP Video Organizer in every app; `pvorg` stays the technical name. | One product name everywhere. Renaming files and identifiers would break existing libraries and installs. |
 | The sidebar can be hidden, and the choice is remembered. | The viewer and the mapping matrices benefit from the full width; a remembered choice suits a single-user tool. |
 | Web seek-preview sprites are made from keyframes during Preparing Previews, and failures aren't retried. | Decoding every frame made a first launch on a real library take minutes, and long videos timed out and were retried on every launch. The library still opens only once sprites are done, so every video has its scrubber preview. |
+| Include Pairing is a thumbs-up toggle that shows the saved decision (outlined while Undecided, filled once Yes), rather than a button that disappears once used. | The button tells you which pairings you've already confirmed, and the same control undoes a mistaken Yes. It mirrors Exclude Pairing: no confirmation, Undo, the pairing stays in place. |
 | One shared spec for all apps. | One product, one source of truth; platform sections record the honest differences. |
 
 ---
@@ -828,9 +856,10 @@ decision changes.
   - File: Reload Library ⌘R, Clean Up Stale Entries…, Save Mapping Changes ⌘S
     and Revert Mapping Changes….
   - Go: Viewer V, Filters C, the rest without keys.
-  - Viewer: mode P, Previous B, Next N, Exclude ⌫, Play/Pause Space, Skip ←
-    and →, Jump To 0–9.
-  - Edit: Undo / Redo Exclude Pairing.
+  - Viewer: mode P, Previous B, Next N, Include I (a checkmark item), Exclude
+    ⌫, Play/Pause Space, Skip ← and →, Jump To 0–9.
+  - Edit: Undo / Redo Exclude Pairing, Include Pairing and Mark Pairing
+    Undecided.
   - View: the system Hide / Show Sidebar ⌃⌘S, with the toolbar's sidebar
     button; the choice is remembered (§4.1).
   - Library toolbar: ⌘A, Esc, ⌘⌫.
@@ -996,6 +1025,7 @@ Status of each app against this spec at the version above. ✓ conforms,
 | Optional: player volume and full screen | — | ✓ | — | — |
 | Optional: missing-tool warning | — | ✓ | — | — |
 | Optional: import from pvorg.yml | — | ✓ | — | — |
+| Optional: include pairing | ✓ | — | — | — |
 
 ## 18. Maintaining this spec
 

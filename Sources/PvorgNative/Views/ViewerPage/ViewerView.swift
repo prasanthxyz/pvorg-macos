@@ -68,6 +68,7 @@ struct ViewerView: View {
 
     @ViewBuilder
     private func stageMenu(for combination: Combination) -> some View {
+        Toggle("Include “\(combination.gallery.name)” for This Video", systemImage: "hand.thumbsup", isOn: includeBinding)
         Button("Exclude “\(combination.gallery.name)” from This Video", systemImage: "hand.thumbsdown") {
             commands.excludeCurrentPairing()
         }
@@ -113,6 +114,18 @@ struct ViewerView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        // 👍 shows whether pvorg.json explicitly includes the pairing: outlined
+        // while it's undecided, filled and pressed in once it's Yes.
+        ToolbarItem {
+            Toggle(isOn: includeBinding) {
+                Label("Include Pairing", systemImage: commands.isCurrentPairingIncluded ? "hand.thumbsup.fill" : "hand.thumbsup")
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            .toggleStyle(.button)
+            .help(includeHelp)
+            .disabled(appState.currentCombination == nil)
+        }
+
         ToolbarItem {
             Button {
                 commands.excludeCurrentPairing()
@@ -168,6 +181,13 @@ struct ViewerView: View {
         }
     }
 
+    private var includeBinding: Binding<Bool> {
+        Binding(
+            get: { commands.isCurrentPairingIncluded },
+            set: { _ in commands.toggleCurrentPairingInclusion() }
+        )
+    }
+
     private var modeBinding: Binding<ViewerModel.Mode> {
         Binding(
             get: { viewer.mode },
@@ -185,6 +205,13 @@ struct ViewerView: View {
     private var subtitle: String {
         guard let combination = appState.currentCombination else { return "" }
         return DisplayName.credits(studio: combination.video.studio, actors: combination.video.actors)
+    }
+
+    private var includeHelp: String {
+        guard let combination = appState.currentCombination else { return "Include this pairing" }
+        return commands.isCurrentPairingIncluded
+            ? "“\(combination.gallery.name)” is included for this video. Click to mark it undecided (I)."
+            : "Include “\(combination.gallery.name)” for this video: writes Yes to pvorg.json (I). Undo with ⌘Z."
     }
 
     private var excludeHelp: String {

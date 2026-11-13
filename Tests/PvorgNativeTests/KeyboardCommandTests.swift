@@ -23,6 +23,7 @@ final class KeyboardCommandTests: XCTestCase {
         XCTAssertEqual(PlainKeyCommand(characters: String(UnicodeScalar(NSRightArrowFunctionKey)!)), .skipForward)
         XCTAssertEqual(PlainKeyCommand(characters: "7"), .jump(tenths: 7))
         XCTAssertEqual(PlainKeyCommand(characters: "\u{7f}"), .excludePairing, "The Delete key")
+        XCTAssertEqual(PlainKeyCommand(characters: "i"), .includePairing)
         XCTAssertNil(PlainKeyCommand(characters: "x"))
     }
 

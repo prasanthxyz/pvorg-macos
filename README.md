@@ -66,6 +66,70 @@ open -W --env PVORG_CONFIG=/tmp/pvorg-fixture/pvorg.json \
 cat /tmp/pvorg-tour/results.txt
 ```
 
+## Releasing
+
+A release is a version tag plus a GitHub release carrying an unsigned DMG for
+Apple silicon. You need Xcode selected (`xcode-select -p` prints
+`/Applications/Xcode.app/Contents/Developer`) and the
+[GitHub CLI](https://cli.github.com) (`brew install gh`, then `gh auth login`).
+Start from an up-to-date `main` with nothing uncommitted.
+
+1. **Test and build** with the new version number:
+
+   ```bash
+   export VERSION=1.1.0
+   swift test
+   ./Scripts/build_app_bundle.sh      # must print "Assets compiled.", or the app has no icon
+   ```
+
+2. **Check the app**, then open it once on your library:
+
+   ```bash
+   APP="dist/PP Video Organizer.app"
+   plutil -p "$APP/Contents/Info.plist" | grep ShortVersion   # the new version
+   lipo -archs "$APP/Contents/MacOS/pvorg"                     # arm64
+   codesign -dv "$APP" 2>&1 | grep Signature                   # Signature=adhoc
+   open "$APP"
+   ```
+
+3. **Package a DMG** with the usual "drag to Applications" link, and its
+   checksum:
+
+   ```bash
+   rm -rf dist/dmg && mkdir dist/dmg
+   cp -R "$APP" dist/dmg/ && ln -s /Applications dist/dmg/Applications
+   hdiutil create -volname "PP Video Organizer" -srcfolder dist/dmg -ov -format UDZO "dist/pvorg-macos-$VERSION.dmg"
+   shasum -a 256 "dist/pvorg-macos-$VERSION.dmg" > "dist/pvorg-macos-$VERSION.dmg.sha256"
+   ```
+
+4. **Write the release notes** in `dist/release-notes.md`: what changed, then
+   the standing notes below.
+
+   ```markdown
+   **Requirements:** macOS 14 or later on Apple silicon. Install ffmpeg
+   (`brew install ffmpeg`) for contact sheets and video details.
+
+   **Unsigned build.** On first launch macOS blocks it: open System Settings ›
+   Privacy & Security and click **Open Anyway**, or run
+   `xattr -dr com.apple.quarantine "/Applications/PP Video Organizer.app"`
+   ```
+
+5. **Tag and publish:**
+
+   ```bash
+   git tag "v$VERSION" && git push origin "v$VERSION"
+   gh release create "v$VERSION" "dist/pvorg-macos-$VERSION.dmg" "dist/pvorg-macos-$VERSION.dmg.sha256" \
+     --title "PP Video Organizer for macOS $VERSION" --notes-file dist/release-notes.md
+   ```
+
+6. **Try it as a user would:** download the DMG from the release page in a
+   browser, drag the app to Applications and open it. Only a downloaded copy
+   gets the unsigned-app block, so this is the one step a local build can't
+   check.
+
+`dist/` is ignored by git. Clean it up with `rm -rf dist`: `dist/dmg/Applications`
+is only a link, so this never touches the real Applications folder.
+
 ## Project layout
 
 - `Sources/PvorgNative/App`: app entry, pages, menu commands, single-key commands
